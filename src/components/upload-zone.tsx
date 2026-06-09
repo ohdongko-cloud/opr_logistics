@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -35,11 +36,18 @@ type FileSummary = {
 };
 
 type UploadResponse = {
+  jobId: string | null;
   files: FileSummary[];
   slots: Record<RawStage, SlotInfo>;
   missing: RawStage[];
   conflicts: Array<{ stage: RawStage; fileIndices: number[] }>;
   combinedFileIndex: number | null;
+  totals?: {
+    stage1Y: number;
+    output1Qty: number;
+    output2PickQty: number;
+  } | null;
+  warnings?: string[];
 };
 
 export function UploadZone() {
@@ -241,6 +249,36 @@ export function UploadZone() {
                 )
                 .join("; ")}
             </p>
+          )}
+
+          {result.totals && (
+            <div className="grid gap-2 rounded-md bg-emerald-50 px-4 py-3 text-xs text-emerald-900">
+              <div className="font-semibold">합계 검증</div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>1단계 Y합: {result.totals.stage1Y}</div>
+                <div>출력1 수량합: {result.totals.output1Qty}</div>
+                <div>출력2 피킹합: {result.totals.output2PickQty}</div>
+              </div>
+              {result.totals.stage1Y !== result.totals.output1Qty ||
+              result.totals.stage1Y !== result.totals.output2PickQty ? (
+                <div className="font-semibold text-rose-700">
+                  ⚠ 합계가 일치하지 않습니다.
+                </div>
+              ) : (
+                <div className="text-emerald-800">✓ 1단계 Y = 출력1 = 출력2 (정합)</div>
+              )}
+            </div>
+          )}
+
+          {result.jobId && (
+            <div className="flex items-center justify-end">
+              <Link
+                href={`/jobs/${result.jobId}`}
+                className="rounded-md bg-emerald-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+              >
+                미리보기로 이동 →
+              </Link>
+            </div>
           )}
         </section>
       )}

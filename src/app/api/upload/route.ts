@@ -1,18 +1,26 @@
 /**
- * POST /api/upload — RAW 4종 업로드 + 자동 단계 판별 (PRD §4.1 F1)
+ * POST /api/upload — RAW 4종 업로드 + 자동 단계 판별 + 잡 처리 (PRD §4.1·§4.4·§4.5)
  *
  * 입력: multipart/form-data, 필드명 'files' (1~4개)
- * 출력: 슬롯 배정 결과 + 시트별 detection
+ * 동작:
+ *   1. 메타/매직바이트 검증
+ *   2. 각 파일 파싱 → 단계 자동 판별
+ *   3. 4 슬롯 배정. 4단계 모두 채워지면 processJob 실행 + 인메모리 잡 저장
+ *   4. 응답에 jobId / slots / 합계 검증 포함
  *
- * NOTE: M2 단계에서는 파일을 메모리에서 파싱만 하고 Blob/Neon에 저장하지 않는다.
- *       (Blob 업로드 + 잡 영속화는 M5에서 추가)
+ * M5에서 Neon + Vercel Blob 영속화로 교체.
  */
-
 import { NextResponse } from "next/server";
 
-import { parseWorkbook, pickStageFromWorkbook } from "@/lib/parser/xlsx";
-import type { RawStage } from "@/lib/parser/signatures";
-import { ALL_STAGES } from "@/lib/parser/signatures";
+import { processJob } from "@/lib/generate/process";
+import { staticOutletResolver } from "@/lib/job/plants";
+import { createJob } from "@/lib/job/store";
+import { ALL_STAGES, type RawStage } from "@/lib/parser/signatures";
+import {
+  parseWorkbook,
+  pickStageFromWorkbook,
+  type ParsedWorkbook,
+} from "@/lib/parser/xlsx";
 import { assignSlots, type FileDetection } from "@/lib/upload/assign";
 import {
   MAX_SINGLE_FILE_BYTES,
@@ -22,7 +30,6 @@ import {
 } from "@/lib/upload/validate";
 
 export const runtime = "nodejs";
-// 큰 파일 파싱은 시간이 걸릴 수 있음. Vercel Pro 60s, Hobby 10s.
 export const maxDuration = 60;
 
 interface SheetSummary {
@@ -52,7 +59,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const rawFiles = formData.getAll("files").filter((v): v is File => v instanceof File);
+  const rawFiles = formData
+    .getAll("files")
+    .filter((v): v is File => v instanceof File);
   if (rawFiles.length === 0) {
     return NextResponse.json(
       { error: "files 필드에 .xlsx 파일이 1개 이상 필요합니다." },
@@ -66,7 +75,6 @@ export async function POST(req: Request) {
     );
   }
 
-  // 1) 메타 / 총용량 검증
   const totalCheck = validateTotalSize(rawFiles.map((f) => ({ size: f.size })));
   if (!totalCheck.ok) {
     return NextResponse.json(
@@ -83,21 +91,17 @@ export async function POST(req: Request) {
       );
     }
     if (f.size > MAX_SINGLE_FILE_BYTES) {
-      return NextResponse.json(
-        { error: `${f.name}: 50MB 초과` },
-        { status: 413 }
-      );
+      return NextResponse.json({ error: `${f.name}: 50MB 초과` }, { status: 413 });
     }
   }
 
-  // 2) 각 파일 파싱 + 단계 판별
   const fileSummaries: FileSummary[] = [];
   const detections: FileDetection[] = [];
+  const workbooks: (ParsedWorkbook | null)[] = [];
 
   for (let i = 0; i < rawFiles.length; i++) {
     const file = rawFiles[i]!;
     const buf = await file.arrayBuffer();
-    // magic byte 검증
     const head = new Uint8Array(buf.slice(0, 4));
     const magic = validateMagic(head);
     if (!magic.ok) {
@@ -115,11 +119,12 @@ export async function POST(req: Request) {
         bestConfidence: 0,
         stageCandidates: [],
       });
+      workbooks.push(null);
       continue;
     }
-
     try {
       const wb = parseWorkbook(buf);
+      workbooks.push(wb);
       const sheetSummaries: SheetSummary[] = wb.sheets.map((s) => ({
         sheetName: s.name,
         headerRow: s.headerRow,
@@ -127,8 +132,6 @@ export async function POST(req: Request) {
         confidence: s.detection.confidence,
         rowCount: s.rows.length,
       }));
-
-      // 파일 단위 best detection: 가장 높은 confidence
       let best: { stage: RawStage | null; confidence: number } = {
         stage: null,
         confidence: 0,
@@ -142,15 +145,13 @@ export async function POST(req: Request) {
             sheetName: s.name,
           });
           if (s.detection.confidence > best.confidence) {
-            best = { stage: s.detection.stage, confidence: s.detection.confidence };
+            best = {
+              stage: s.detection.stage,
+              confidence: s.detection.confidence,
+            };
           }
         }
       }
-      // 통합 파일 후보: 4단계 모두 있는지 확인
-      const isCombined = ALL_STAGES.every((st) =>
-        candidates.some((c) => c.stage === st)
-      );
-
       fileSummaries.push({
         fileIndex: i,
         filename: file.name,
@@ -161,11 +162,12 @@ export async function POST(req: Request) {
       detections.push({
         fileIndex: i,
         filename: file.name,
-        bestStage: isCombined ? best.stage : best.stage,
+        bestStage: best.stage,
         bestConfidence: best.confidence,
         stageCandidates: candidates,
       });
     } catch (err) {
+      workbooks.push(null);
       fileSummaries.push({
         fileIndex: i,
         filename: file.name,
@@ -183,10 +185,8 @@ export async function POST(req: Request) {
     }
   }
 
-  // 3) 슬롯 배정
   const assignment = assignSlots(detections);
 
-  // 4) 응답 (각 슬롯에 파싱된 시트 메타 첨부)
   const slots: Record<
     RawStage,
     { fileIndex: number | null; sheetName: string | null; rowCount: number | null }
@@ -202,7 +202,6 @@ export async function POST(req: Request) {
     if (fi === undefined) continue;
     const summary = fileSummaries[fi];
     if (!summary) continue;
-    // 같은 파일 안에 stage 시트가 둘 이상이면 가장 confidence 높은 것
     const sheet = summary.sheets
       .filter((s) => s.stage === stage)
       .sort((a, b) => b.confidence - a.confidence)[0];
@@ -214,15 +213,57 @@ export async function POST(req: Request) {
       };
     }
   }
-  // pickStageFromWorkbook은 ParsedWorkbook 객체가 필요하지만, 위에서 이미 summary만 들고 있음.
-  // 실제 데이터를 들고 다음 단계로 넘기려면 jobs 테이블/blob에 저장 필요 → M5.
-  void pickStageFromWorkbook;
+
+  // 모든 슬롯이 채워졌다면 잡 처리 + 인메모리 저장
+  let jobId: string | null = null;
+  let totals: { stage1Y: number; output1Qty: number; output2PickQty: number } | null =
+    null;
+  let warnings: string[] = [];
+
+  if (assignment.missing.length === 0) {
+    try {
+      const s1 = pickStageFromWorkbook(workbooks[slots.stage1.fileIndex!]!, "stage1");
+      const s3 = pickStageFromWorkbook(workbooks[slots.stage3.fileIndex!]!, "stage3");
+      const s4 = pickStageFromWorkbook(workbooks[slots.stage4.fileIndex!]!, "stage4");
+      if (s1 && s3 && s4) {
+        const processed = processJob({
+          stage1: s1,
+          stage3: s3,
+          stage4: s4,
+          outletResolver: staticOutletResolver,
+        });
+        const plnt = processed.detectedPlants[0] ?? "8227";
+        const job = createJob({
+          plnt,
+          outletName: processed.outletName,
+          sourceFilenames: rawFiles.map((f) => f.name),
+          detectedSheets: {
+            stage1: slots.stage1.sheetName,
+            stage2: slots.stage2.sheetName,
+            stage3: slots.stage3.sheetName,
+            stage4: slots.stage4.sheetName,
+          },
+          processed,
+        });
+        jobId = job.id;
+        totals = processed.totals;
+        warnings = processed.warnings;
+      }
+    } catch (err) {
+      warnings.push(
+        `잡 처리 실패: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
 
   return NextResponse.json({
+    jobId,
     files: fileSummaries,
     slots,
     missing: assignment.missing,
     conflicts: assignment.conflicts,
     combinedFileIndex: assignment.combinedFileIndex,
+    totals,
+    warnings,
   });
 }
