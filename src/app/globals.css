@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: oklch(0.55 0.13 250);
+  --color-bg: oklch(0.985 0.005 250);
+  --color-card: oklch(1 0 0);
+  --color-border: oklch(0.92 0.005 250);
+  --color-muted: oklch(0.55 0.01 250);
+  --color-danger: oklch(0.6 0.21 25);
+  --color-warning: oklch(0.74 0.16 70);
+  --color-success: oklch(0.65 0.16 145);
+
+  --radius-card: 12px;
+  --font-sans: "Noto Sans KR", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: oklch(0.2 0.01 250);
+  font-family: var(--font-sans);
+}
+
+/* ============================================================================
+   인쇄 모드 (PRD §4.5 F5 / §4.8 F8 / 부록 D)
+   ============================================================================ */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 3mm;
+  }
+
+  body {
+    background: white;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-page {
+    page-break-after: always;
+  }
+
+  .print-page:last-child {
+    page-break-after: auto;
+  }
+
+  table.picking {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 8pt;
+  }
+
+  table.picking thead {
+    display: table-header-group;
+  }
+
+  table.picking td,
+  table.picking th {
+    overflow: hidden;
+    white-space: nowrap;
+    padding: 4px 6px;
+    border: 0.5pt solid oklch(0.7 0 0);
+  }
+
+  table.picking tr.row {
+    height: 8mm;
+  }
+}
