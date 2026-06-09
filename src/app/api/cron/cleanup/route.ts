@@ -37,13 +37,14 @@ export async function GET(req: Request) {
   }
 
   const start = Date.now();
-  const { deletedIds } = deleteExpiredJobs();
+  const { deletedIds, deletedBlobs } = await deleteExpiredJobs();
   const ms = Date.now() - start;
 
-  // TODO M6: cleanup_log 테이블에 결과 기록 + 24h 동안 row 없으면 알람
+  // cleanup_log 테이블 기록은 M9에서 (DB 우선순위 낮음 — TTL 누락 알람 정도면 충분)
   return NextResponse.json({
     ok: true,
-    deleted: deletedIds.length,
+    deletedJobs: deletedIds.length,
+    deletedBlobs: deletedBlobs.length,
     elapsedMs: ms,
   });
 }

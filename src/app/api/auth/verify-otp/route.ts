@@ -41,7 +41,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 
-  const res = verifyOtp(email, (storedHash) => verifyOtpHash(code, storedHash));
+  const res = await verifyOtp(email, (storedHash) =>
+    verifyOtpHash(code, storedHash)
+  );
   if (!res.ok) {
     return NextResponse.json(
       {

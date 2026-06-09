@@ -237,7 +237,7 @@ export async function POST(req: Request) {
           outletResolver: staticOutletResolver,
         });
         const plnt = processed.detectedPlants[0] ?? "8227";
-        const job = createJob({
+        const job = await createJob({
           plnt,
           outletName: processed.outletName,
           sourceFilenames: rawFiles.map((f) => f.name),

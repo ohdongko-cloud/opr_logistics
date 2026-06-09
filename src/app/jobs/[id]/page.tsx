@@ -24,7 +24,7 @@ export default async function JobPreviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const job = getJob(id);
+  const job = await getJob(id);
   if (!job) notFound();
 
   const today = new Date();

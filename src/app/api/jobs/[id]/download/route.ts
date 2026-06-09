@@ -17,7 +17,7 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> }
 ) {
   const { id } = await ctx.params;
-  const job = getJob(id);
+  const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const { buffer, filename } = buildIntegratedWorkbook({

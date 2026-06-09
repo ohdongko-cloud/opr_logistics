@@ -28,7 +28,7 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> }
 ) {
   const { id } = await ctx.params;
-  const job = getJob(id);
+  const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
   return NextResponse.json({
     id: job.id,
@@ -51,7 +51,7 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string }> }
 ) {
   const { id } = await ctx.params;
-  const job = getJob(id);
+  const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   let body: unknown;
@@ -92,7 +92,7 @@ export async function PATCH(
     }
   }
 
-  const updated = updateJob(id, {
+  const updated = await updateJob(id, {
     pgNumbers: parsed.data.pgNumbers,
     headerOverrides: parsed.data.headerOverrides,
   });

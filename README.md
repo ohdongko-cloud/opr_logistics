@@ -12,13 +12,16 @@
 - Vitest (단위테스트)
 - Vercel Cron (7일 TTL 자동 삭제)
 
-## 진행 단계 (M1~M6)
+## 진행 단계
 - [x] **M1**: PRD 작성 + 리뷰 게이트 통과
-- [ ] **M2**: 부트스트랩 + RAW 4슬롯 업로드/자동 인식 (← 진행 중)
-- [ ] **M3**: 출력1·출력3 생성 + 소스빈 분리 + PG 검증
-- [ ] **M4**: 출력2 + 인쇄 미리보기 + 페이지 분할
-- [ ] **M5**: PG 입력 단계 + 통합 엑셀 다운로드 + Neon 7일 TTL
-- [ ] **M6**: 보안 게이트 + 푸시 + Vercel 배포 검증
+- [x] **M2**: 부트스트랩 + RAW 4슬롯 업로드/자동 인식
+- [x] **M3**: 출력1·출력3 생성 + 소스빈 분리 + PG 검증
+- [x] **M4**: 출력2 + 인쇄 미리보기 + 페이지 분할
+- [x] **M5**: PG 입력 단계 + 통합 엑셀 다운로드 + Neon 7일 TTL
+- [x] **M6**: 보안 게이트 + 푸시 + Vercel 배포 검증
+- [x] **M7**: 이메일 OTP 로그인 (Gmail SMTP)
+- [x] **M8**: Neon 실연결 + Vercel Blob + 인메모리 폴백
+- [ ] **M9**: 최종 보안 게이트 + 안정화
 
 ## 로컬 개발
 
@@ -50,10 +53,32 @@ npm run dev
 | `npm run db:migrate` | 마이그레이션 적용 |
 | `npm run db:studio` | Drizzle Studio (DB 탐색) |
 
-## 배포
-- Vercel 프로젝트와 연결, `BLOB_READ_WRITE_TOKEN` · `DATABASE_URL` · `CRON_SECRET` 환경변수 설정.
-- `vercel.json`의 cron이 매일 03:00 KST `/api/cron/cleanup` 실행.
-- M6 보안 게이트 이전엔 Vercel Preview Protection 또는 인증 없이 내부망 사용.
+## 배포 (Vercel)
+
+### 1. 환경변수 설정 (Settings → Environment Variables)
+| 카테고리 | 변수 | 비고 |
+|----------|------|------|
+| Neon | `DATABASE_URL` (pooled) / `DATABASE_URL_UNPOOLED` (direct) | Neon "Connection details" |
+| Blob | `BLOB_READ_WRITE_TOKEN` · `BLOB_STORE_ID` · `BLOB_WEBHOOK_PUBLIC_KEY` | Blob 스토어 Connect Project 시 자동 |
+| Auth | `SESSION_SECRET` · `OTP_PEPPER` · `ALLOWED_EMAILS` | 노드 randomBytes(32).hex |
+| SMTP | `SMTP_HOST=smtp.gmail.com` · `SMTP_PORT=587` · `SMTP_USER` · `SMTP_PASS` · `SMTP_FROM` | Gmail 앱 비밀번호 |
+| Cron | `CRON_SECRET` | `/api/cron/cleanup` Bearer |
+
+### 2. DB 마이그레이션 (1회)
+```bash
+vercel link            # 프로젝트 연결
+vercel env pull .env.local
+npm run db:migrate     # drizzle 멱등 SQL 실행 (plants/jobs/cleanup_log/email_otps/sessions)
+npm run db:seed        # 강서점 1행 시드
+```
+
+### 3. cron
+`vercel.json`에 매일 18:00 UTC (=03:00 KST) `/api/cron/cleanup` 등록됨. Vercel Pro 이상에서 작동.
+
+### 폴백 동작
+- `DATABASE_URL*` 미설정 → 잡 store 인메모리, 재배포 시 휘발
+- `BLOB_READ_WRITE_TOKEN` 미설정 → RAW/결과 인메모리, 재배포 시 휘발
+- 둘 다 설정 → Neon + Blob 영속화 (운영 모드)
 
 ## 라이선스
 내부 도구. 외부 배포 금지.
