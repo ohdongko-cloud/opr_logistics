@@ -225,6 +225,10 @@ export async function POST(req: Request) {
       const s1 = pickStageFromWorkbook(workbooks[slots.stage1.fileIndex!]!, "stage1");
       const s3 = pickStageFromWorkbook(workbooks[slots.stage3.fileIndex!]!, "stage3");
       const s4 = pickStageFromWorkbook(workbooks[slots.stage4.fileIndex!]!, "stage4");
+      const s2 =
+        slots.stage2.fileIndex !== null
+          ? pickStageFromWorkbook(workbooks[slots.stage2.fileIndex]!, "stage2")
+          : null;
       if (s1 && s3 && s4) {
         const processed = processJob({
           stage1: s1,
@@ -244,6 +248,7 @@ export async function POST(req: Request) {
             stage4: slots.stage4.sheetName,
           },
           processed,
+          rawSheets: { stage1: s1, stage2: s2, stage3: s3, stage4: s4 },
         });
         jobId = job.id;
         totals = processed.totals;

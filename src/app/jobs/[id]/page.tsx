@@ -1,13 +1,18 @@
 /**
- * 잡 미리보기 페이지 — 인쇄 미리보기 + 출력1/2/3/ETC 탭 (PRD §5 / §4.5)
+ * 잡 미리보기 페이지 (PRD §5 / §4.5 / §4.6 / §4.8)
  *
- * M4 단계: 인메모리 잡 store에서 조회. 새로고침에도 살아 있음(서버 프로세스 동안).
- * M5에서 Neon + Blob 영속화로 교체. (잡 만료 시 404)
+ * - 머리글/바닥글 인라인 편집 (자동 저장)
+ * - ETC 확인 체크박스 (0건 아니면 인쇄 비활성)
+ * - 통합 엑셀 다운로드
+ * - PG 입력 필요 시 별도 페이지 링크
+ * - A4 인쇄 페이지 N개 렌더
+ *
+ * 인메모리 store M5. M6에서 Neon으로 교체.
  */
 import { notFound } from "next/navigation";
 
+import { JobControls } from "@/components/job-controls";
 import { PickingPage } from "@/components/print/picking-page";
-import { PrintButton } from "@/components/print-button";
 import { formatDateDot, formatMmDd, formatPrintTimestamp } from "@/lib/dates";
 import { getJob } from "@/lib/job/store";
 
@@ -35,6 +40,11 @@ export default async function JobPreviewPage({
 
   const pgNumberDisplay = Object.values(job.pgNumbers).join(", ");
   const { processed } = job;
+  const pgComplete =
+    processed.detectedPlants.length > 0 &&
+    processed.detectedPlants.every(
+      (p) => (job.pgNumbers[p] ?? "").length === 10
+    );
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 p-8 print:p-0">
@@ -43,26 +53,31 @@ export default async function JobPreviewPage({
           <h1 className="text-xl font-semibold">잡 #{job.id.slice(0, 8)}</h1>
           <p className="text-xs text-[var(--color-muted)]">
             플랜트 {job.plnt} · 출고지 {job.outletName} · 페이지{" "}
-            {processed.pages.length} · 자재 {processed.output2.length}
+            {processed.pages.length} · 자재 {processed.output2.length} · ETC{" "}
+            {processed.etc.length} · 만료 {job.expiresAt.toISOString().slice(0, 10)}
           </p>
-        </div>
-        <div className="flex gap-2">
-          <PrintButton label="인쇄 (Ctrl+P)" />
         </div>
       </header>
 
-      {processed.totals.output2PickQty !== processed.totals.stage1Y && (
-        <div className="no-print rounded-md bg-amber-50 px-4 py-2 text-xs text-amber-900">
-          ⚠ 합계 검증 실패: 1단계 Y합({processed.totals.stage1Y}) ≠ 출력2 합(
-          {processed.totals.output2PickQty})
-        </div>
-      )}
+      <JobControls
+        jobId={job.id}
+        initialOverrides={{
+          docTitle: job.headerOverrides.docTitle ?? docTitle,
+          deliveryDate: job.headerOverrides.deliveryDate ?? deliveryDate,
+          footerLeft: job.headerOverrides.footerLeft ?? footerLeft,
+        }}
+        initialEtcAck={job.etcAcknowledged}
+        etcCount={processed.etc.length}
+        pgComplete={pgComplete}
+        detectedPlants={processed.detectedPlants}
+      />
 
-      {processed.etc.length > 0 && (
-        <div className="no-print rounded-md bg-amber-50 px-4 py-3 text-xs text-amber-900">
-          <strong>ETC 리포트 {processed.etc.length}건</strong> — 인쇄 페이지에 포함되지
-          않습니다 (E·G~Z로 시작하는 소스빈). 현장 출고 누락 방지를 위해 별도 확인
-          필요. (확인 체크박스 UI는 다음 커밋에서 추가)
+      {/* 합계 정합성 검증 */}
+      {(processed.totals.output1Qty !== processed.totals.stage1Y ||
+        processed.totals.output2PickQty !== processed.totals.stage1Y) && (
+        <div className="no-print rounded-md bg-rose-50 px-4 py-2 text-xs text-rose-900">
+          ⚠ 합계 검증 실패: 1단계 Y합({processed.totals.stage1Y}) · 출력1(
+          {processed.totals.output1Qty}) · 출력2({processed.totals.output2PickQty})
         </div>
       )}
 
@@ -72,13 +87,17 @@ export default async function JobPreviewPage({
             경고 {processed.warnings.length}건
           </summary>
           <ul className="mt-2 list-disc pl-4 text-[var(--color-muted)]">
-            {processed.warnings.map((w, i) => (
+            {processed.warnings.slice(0, 20).map((w, i) => (
               <li key={i}>{w}</li>
             ))}
+            {processed.warnings.length > 20 && (
+              <li>… 외 {processed.warnings.length - 20}건 생략</li>
+            )}
           </ul>
         </details>
       )}
 
+      {/* 인쇄 페이지 */}
       {processed.pages.map((p) => (
         <PickingPage
           key={p.pageIndex}
