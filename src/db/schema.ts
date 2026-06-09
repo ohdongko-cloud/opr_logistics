@@ -93,6 +93,55 @@ export const cleanupLog = pgTable("cleanup_log", {
 });
 
 // ============================================================================
+// email_otps — 이메일 OTP 인증 (PRD §4.11 F11 / M6/M7)
+// ============================================================================
+export const emailOtps = pgTable(
+  "email_otps",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    email: text("email").notNull(),
+    /** HMAC-SHA256(code, OTP_PEPPER) hex */
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now() + interval '10 minutes'`),
+    attempts: integer("attempts").notNull().default(0),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    /** 발송 IP (감사 로그용, PII 마스킹 대상) */
+    requestIp: text("request_ip"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("email_otps_email_idx").on(t.email),
+    index("email_otps_expires_at_idx").on(t.expiresAt),
+  ]
+);
+
+// ============================================================================
+// sessions — 로그인 세션 (PRD §4.11 F11)
+// ============================================================================
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now() + interval '24 hours'`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("sessions_email_idx").on(t.email),
+    index("sessions_expires_at_idx").on(t.expiresAt),
+  ]
+);
+
+// ============================================================================
 // Types
 // ============================================================================
 export type Plant = typeof plants.$inferSelect;
@@ -103,3 +152,6 @@ export type NewJob = typeof jobs.$inferInsert;
 
 export type CleanupLog = typeof cleanupLog.$inferSelect;
 export type NewCleanupLog = typeof cleanupLog.$inferInsert;
+
+export type EmailOtp = typeof emailOtps.$inferSelect;
+export type Session = typeof sessions.$inferSelect;

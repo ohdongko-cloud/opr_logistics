@@ -7,7 +7,8 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
 
-const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+// 런타임은 pooled (DATABASE_URL) 우선. 폴백으로 unpooled 허용.
+const url = process.env.DATABASE_URL ?? process.env.DATABASE_URL_UNPOOLED;
 if (!url) {
   throw new Error(
     "[db] DATABASE_URL 또는 DATABASE_URL_UNPOOLED 환경변수가 설정되지 않았습니다."
