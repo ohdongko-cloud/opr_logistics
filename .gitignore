@@ -54,9 +54,8 @@ coverage/
 # TypeScript build cache
 *.tsbuildinfo
 
-# Drizzle generated
-drizzle/meta/
-# Keep migration SQL files in version control (멱등 마이그레이션 추적)
+# Drizzle — 마이그레이션 SQL + meta(journal/snapshot) 모두 버전관리
+# (meta가 없으면 drizzle-kit 이력 추적 불가)
 
 # OS
 .DS_Store
