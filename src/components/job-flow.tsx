@@ -50,128 +50,75 @@ export interface JobView {
 }
 
 const STEPS = [
-  "① 1단계 업로드",
+  "① 1단계 결과",
   "② 2단계(선택)",
   "③ PG 입력",
   "④ 출력1",
   "⑤ 3단계 업로드",
   "⑥ 4단계 업로드",
-  "⑦ 최종 미리보기",
+  "⑦ 최종",
 ];
+
+/** 현재 step에서 이동 가능한 가장 먼 화면 인덱스 (부록 F) */
+function furthestScreen(step: JobView["step"]): number {
+  switch (step) {
+    case "s1_uploaded":
+    case "s2_uploaded":
+      return 3; // 출력1 미리보기까지 열람 가능
+    case "pg_entered":
+      return 4; // 3단계 업로드
+    case "s3_uploaded":
+      return 5; // 4단계 업로드
+    case "s4_uploaded":
+    case "ready":
+      return 6;
+    default:
+      return 0;
+  }
+}
 
 export function JobFlow({ initialView }: { initialView: JobView }) {
   const router = useRouter();
   const [view, setView] = useState<JobView>(initialView);
-  const col = (k: string) => view.copy.find((c) => c.key === k);
+  const furthest = furthestScreen(view.step);
+  const [viewIdx, setViewIdx] = useState<number>(furthest);
 
-  const refresh = (v: unknown) => setView(v as JobView);
+  const refresh = (v: unknown) => {
+    const nv = v as JobView;
+    setView(nv);
+    // 전이 후 새로 도달한 화면으로 이동
+    setViewIdx(furthestScreen(nv.step));
+  };
+  const goto = (i: number) => setViewIdx(Math.max(0, Math.min(furthest, i)));
 
   return (
     <div className="flex flex-col gap-6">
-      <Progress step={view.step} />
+      <Progress current={viewIdx} furthest={furthest} onJump={goto} />
 
-      {/* STEP1 완료 후: 분배번호/자재 복사 + 2단계 업로드 or PG로 */}
-      {view.step === "s1_uploaded" && (
-        <Section title="STEP 1 완료 — 물류분배 실행 입력값 복사">
-          {col("distributionNo") && (
-            <CopyButton
-              label="분배번호"
-              values={col("distributionNo")!.values}
-              count={col("distributionNo")!.count}
-            />
-          )}
-          {col("material") && (
-            <CopyButton
-              label="자재"
-              values={col("material")!.values}
-              count={col("material")!.count}
-            />
-          )}
-          <Out1Summary view={view} />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <StageUpload
-              endpoint={`/api/jobs/${view.id}/stage?n=2`}
-              label="STEP 2: 2단계(물류분배) 업로드 (선택)"
-              hint="SAP 물류분배 실행 후 받은 파일. 통합 엑셀 보존용."
-              onDone={refresh}
-            />
-            <SkipToPg view={view} onDone={refresh} />
-          </div>
-        </Section>
-      )}
+      {/* 좌우 이동 */}
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => goto(viewIdx - 1)}
+          disabled={viewIdx <= 0}
+          className="rounded-md border border-[var(--color-border)] bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-40"
+        >
+          ‹ 이전
+        </button>
+        <span className="text-xs text-[var(--color-muted)]">
+          {STEPS[viewIdx]} ({viewIdx + 1}/{STEPS.length})
+        </span>
+        <button
+          type="button"
+          onClick={() => goto(viewIdx + 1)}
+          disabled={viewIdx >= furthest}
+          className="rounded-md border border-[var(--color-border)] bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-40"
+        >
+          다음 ›
+        </button>
+      </div>
 
-      {/* STEP2 완료 후: PG 입력 */}
-      {view.step === "s2_uploaded" && (
-        <Section title="STEP 3 — PG 생성 입력값 복사 + PG번호 입력">
-          {col("distributionNo") && (
-            <CopyButton
-              label="분배번호 (PG생성용)"
-              values={col("distributionNo")!.values}
-              count={col("distributionNo")!.count}
-            />
-          )}
-          <PgForm view={view} onDone={refresh} />
-        </Section>
-      )}
-
-      {/* PG 입력됨: 출력1 미리보기 + PG 복사 + 3단계 업로드 */}
-      {view.step === "pg_entered" && (
-        <Section title="STEP 4 — 출력1 미리보기 + 피킹지시서 출력 입력값">
-          <Out1Summary view={view} showTable />
-          <CopyButton
-            label="PG번호 (피킹지시서 출력용)"
-            values={Object.values(view.pgNumbers)}
-            count={Object.values(view.pgNumbers).length}
-          />
-          <StageUpload
-            endpoint={`/api/jobs/${view.id}/stage?n=3`}
-            label="STEP 5: 3단계(피킹지시서패션) 업로드"
-            hint="SAP 피킹지시서 출력 후 받은 파일."
-            onDone={refresh}
-          />
-        </Section>
-      )}
-
-      {/* 3단계 완료: 자재코드 복사 + 4단계 업로드 */}
-      {view.step === "s3_uploaded" && (
-        <Section title="STEP 5 완료 — EAN 조회 입력값 복사">
-          {col("materialCode") && (
-            <CopyButton
-              label="자재코드 (EAN 조회용)"
-              values={col("materialCode")!.values}
-              count={col("materialCode")!.count}
-            />
-          )}
-          <StageUpload
-            endpoint={`/api/jobs/${view.id}/stage?n=4`}
-            label="STEP 6: 4단계(EAN) 업로드"
-            hint="SAP EAN 조회 후 받은 파일. 업로드 시 출력2·3 자동 생성."
-            onDone={refresh}
-          />
-        </Section>
-      )}
-
-      {/* 완료: 최종 미리보기 링크 */}
-      {(view.step === "s4_uploaded" || view.step === "ready") && (
-        <Section title="STEP 7 — 완료">
-          <div className="rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-            출력2·3 생성 완료 — 페이지 {view.pageCount} · 자재 {view.output1RowCount} ·
-            ETC {view.etcCount}
-          </div>
-          <Link
-            href={`/jobs/${view.id}/print`}
-            className="self-start rounded-md bg-[var(--color-brand)] px-5 py-2 text-sm font-medium text-white"
-          >
-            인쇄 미리보기 / 다운로드 →
-          </Link>
-          <a
-            href={`/api/jobs/${view.id}/download`}
-            className="self-start rounded-md border border-[var(--color-border)] bg-white px-5 py-2 text-sm font-medium hover:bg-slate-50"
-          >
-            통합 엑셀 다운로드
-          </a>
-        </Section>
-      )}
+      <Screen view={view} idx={viewIdx} onDone={refresh} />
 
       {/* 이전 단계 수정 — 앞 RAW 재업로드 (무효화 강등, 확인 모달) */}
       {view.step !== "s1_uploaded" && view.step !== "s2_uploaded" && (
@@ -213,24 +160,161 @@ export function JobFlow({ initialView }: { initialView: JobView }) {
   );
 }
 
-function Progress({ step }: { step: JobView["step"] }) {
-  const order = ["s1_uploaded", "s2_uploaded", "pg_entered", "s3_uploaded", "s4_uploaded", "ready"];
-  const idx = order.indexOf(step);
+/** idx 화면 1개를 렌더 (부록 F — 도달 단계 자유 열람) */
+function Screen({
+  view,
+  idx,
+  onDone,
+}: {
+  view: JobView;
+  idx: number;
+  onDone: (v: unknown) => void;
+}) {
+  const col = (k: string) => view.copy.find((c) => c.key === k);
+  const pgVals = Object.values(view.pgNumbers);
+
+  switch (idx) {
+    case 0:
+      return (
+        <Section title="STEP 1 — 물류분배 실행 입력값 복사">
+          {col("distributionNo") && (
+            <CopyButton label="분배번호" values={col("distributionNo")!.values} count={col("distributionNo")!.count} />
+          )}
+          {col("material") && (
+            <CopyButton label="자재" values={col("material")!.values} count={col("material")!.count} />
+          )}
+          <Out1Summary view={view} />
+        </Section>
+      );
+    case 1:
+      return (
+        <Section title="STEP 2 — 2단계(물류분배) 업로드 (선택)">
+          <StageUpload
+            endpoint={`/api/jobs/${view.id}/stage?n=2`}
+            label="2단계 업로드"
+            hint="SAP 물류분배 실행 후 받은 파일. 통합 엑셀 보존용. 건너뛰고 PG 입력으로 가도 됩니다."
+            onDone={onDone}
+          />
+        </Section>
+      );
+    case 2:
+      return (
+        <Section title="STEP 3 — PG 생성 입력값 복사 + PG번호 입력">
+          {col("distributionNo") && (
+            <CopyButton label="분배번호 (PG생성용)" values={col("distributionNo")!.values} count={col("distributionNo")!.count} />
+          )}
+          <PgForm view={view} onDone={onDone} />
+        </Section>
+      );
+    case 3:
+      return (
+        <Section title="STEP 4 — 출력1 미리보기 + 피킹지시서 출력 입력값">
+          <Out1Summary view={view} showTable />
+          {pgVals.length > 0 ? (
+            <CopyButton label="PG번호 (피킹지시서 출력용)" values={pgVals} count={pgVals.length} deduped={false} />
+          ) : (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              PG번호 미입력 — ③ PG 입력 단계에서 입력하면 출력1에 반영됩니다.
+            </p>
+          )}
+        </Section>
+      );
+    case 4:
+      return (
+        <Section title="STEP 5 — 3단계 업로드 + EAN 조회 입력값">
+          {col("materialCode") ? (
+            <CopyButton label="자재코드 (EAN 조회용)" values={col("materialCode")!.values} count={col("materialCode")!.count} />
+          ) : (
+            <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-[var(--color-muted)]">
+              3단계 업로드 후 자재코드 복사 버튼이 나타납니다.
+            </p>
+          )}
+          <StageUpload
+            endpoint={`/api/jobs/${view.id}/stage?n=3`}
+            label="3단계(피킹지시서패션) 업로드"
+            hint="SAP 피킹지시서 출력 후 받은 파일."
+            onDone={onDone}
+          />
+        </Section>
+      );
+    case 5:
+      return (
+        <Section title="STEP 6 — 4단계(EAN) 업로드">
+          <StageUpload
+            endpoint={`/api/jobs/${view.id}/stage?n=4`}
+            label="4단계(EAN) 업로드"
+            hint="SAP EAN 조회 후 받은 파일. 업로드 시 출력2·3 자동 생성."
+            onDone={onDone}
+          />
+        </Section>
+      );
+    case 6:
+    default:
+      return (
+        <Section title="STEP 7 — 최종">
+          {view.step === "ready" ? (
+            <>
+              <div className="rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                출력2·3 생성 완료 — 페이지 {view.pageCount} · 자재 {view.output1RowCount} · ETC {view.etcCount}
+              </div>
+              <Link
+                href={`/jobs/${view.id}/print`}
+                className="self-start rounded-md bg-[var(--color-brand)] px-5 py-2 text-sm font-medium text-white"
+              >
+                인쇄 미리보기 / 다운로드 →
+              </Link>
+              <a
+                href={`/api/jobs/${view.id}/download`}
+                className="self-start rounded-md border border-[var(--color-border)] bg-white px-5 py-2 text-sm font-medium hover:bg-slate-50"
+              >
+                통합 엑셀 다운로드
+              </a>
+            </>
+          ) : (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              4단계 업로드가 끝나면 출력2·3가 생성됩니다.
+            </p>
+          )}
+        </Section>
+      );
+  }
+}
+
+function Progress({
+  current,
+  furthest,
+  onJump,
+}: {
+  current: number;
+  furthest: number;
+  onJump: (i: number) => void;
+}) {
   return (
     <ol className="flex flex-wrap items-center gap-2 text-xs">
-      {STEPS.map((s, i) => (
-        <li
-          key={s}
-          className={
-            i <= idx
-              ? "font-medium text-slate-900"
-              : "text-[var(--color-muted)]"
-          }
-        >
-          {s}
-          {i < STEPS.length - 1 ? " ›" : ""}
+      {STEPS.map((s, i) => {
+        const reachable = i <= furthest;
+        return (
+        <li key={s}>
+          <button
+            type="button"
+            onClick={() => reachable && onJump(i)}
+            disabled={!reachable}
+            className={
+              i === current
+                ? "rounded bg-slate-900 px-2 py-1 font-medium text-white"
+                : reachable
+                  ? "rounded px-2 py-1 font-medium text-slate-900 hover:bg-slate-100"
+                  : "px-2 py-1 text-[var(--color-muted)] cursor-not-allowed"
+            }
+          >
+            {s}
+          </button>
+          {i < STEPS.length - 1 ? (
+            <span className="px-0.5 text-[var(--color-muted)]">›</span>
+          ) : null}
         </li>
-      ))}
+        );
+      })}
     </ol>
   );
 }
@@ -339,14 +423,3 @@ function PgForm({ view, onDone }: { view: JobView; onDone: (v: unknown) => void 
   );
 }
 
-function SkipToPg({ view, onDone }: { view: JobView; onDone: (v: unknown) => void }) {
-  return (
-    <div className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-card)] p-5">
-      <p className="text-sm font-medium">2단계 건너뛰기</p>
-      <p className="text-xs text-[var(--color-muted)]">
-        2단계는 통합 엑셀 보존용입니다. 바로 PG 입력으로 진행할 수 있습니다.
-      </p>
-      <PgForm view={view} onDone={onDone} />
-    </div>
-  );
-}
