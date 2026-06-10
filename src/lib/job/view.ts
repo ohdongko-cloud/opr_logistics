@@ -29,7 +29,18 @@ export interface JobView {
   /** 합계 검증 (출력1) */
   totals: { stage1Y: number; output1Qty: number } | null;
   output1RowCount: number;
+  /** 출력1 미리보기 행 (PRD §4.5 F5) */
+  output1Rows: Array<{
+    purchaseGroup: string;
+    plnt: string;
+    outletName: string;
+    qty: number;
+    deliveryNo: string;
+    pgNumber: string;
+    brand: string;
+  }>;
   warningsCount: number;
+  warnings: string[];
   pageCount: number;
   etcCount: number;
 }
@@ -73,7 +84,9 @@ export function toJobView(job: JobRecord): JobView {
     copy,
     totals: out1?.totals ?? null,
     output1RowCount: out1?.output1.length ?? 0,
+    output1Rows: out1?.output1 ?? [],
     warningsCount: (out1?.warnings.length ?? 0) + (o23?.warnings.length ?? 0),
+    warnings: [...(out1?.warnings ?? []), ...(o23?.warnings ?? [])].slice(0, 30),
     pageCount: o23?.pages.length ?? 0,
     etcCount: o23?.etc.length ?? 0,
   };

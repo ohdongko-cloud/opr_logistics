@@ -89,7 +89,11 @@ if (!g[MEM_KEY]) g[MEM_KEY] = memory;
 // ============================================================================
 // 공통 — 부록 D 무효화 적용
 // ============================================================================
-function applyInvalidation(data: JobData, stageN: 1 | 3 | 4): JobData {
+/** 무효화 적용. clearPg=true면 호출자가 pgNumbers도 비워야 함(invalidationFor가 'pgNumbers' 포함 시). */
+function applyInvalidation(
+  data: JobData,
+  stageN: 1 | 3 | 4
+): { data: JobData; clearPg: boolean } {
   const inv = invalidationFor(stageN);
   const next: JobData = {
     stages: { ...data.stages },
@@ -103,7 +107,7 @@ function applyInvalidation(data: JobData, stageN: 1 | 3 | 4): JobData {
     if (d === "stage3") next.stages.stage3 = null;
     if (d === "stage4") next.stages.stage4 = null;
   }
-  return next;
+  return { data: next, clearPg: inv.discard.includes("pgNumbers") };
 }
 
 // ============================================================================
@@ -146,6 +150,7 @@ export async function createJobAtStep1(
   if (USE_DB) {
     const blob = await putBlob(`jobs/${id}/data.json`, JSON.stringify(data), {
       contentType: "application/json",
+      overwrite: true, // 고정 경로 — 고아 blob 방지
     });
     await db.insert(jobsTable).values({
       id,
@@ -162,6 +167,33 @@ export async function createJobAtStep1(
     memory.set(id, rec);
   }
   return rec;
+}
+
+/**
+ * STEP1 재업로드 (PRD §4.10 부록 D) — 기존 잡에 1단계를 다시 올려 전부 무효화 후 재계산.
+ * step을 s1_uploaded로 강등, pgNumbers·stage2~4·출력1·2·3 폐기, 출력1 재생성.
+ */
+export async function reuploadStage1(
+  id: string,
+  stage1: ParsedSheet,
+  sourceFilename: string
+): Promise<TransitionResult> {
+  const job = await getJob(id);
+  if (!job) return { ok: false, error: "not_found" };
+  const output1 = processOutput1({ stage1, outletResolver: staticOutletResolver });
+  const inv = applyInvalidation(job.data, 1); // stage2~4/출력 전부 폐기
+  const next: JobRecord = {
+    ...job,
+    step: "s1_uploaded",
+    pgNumbers: inv.clearPg ? {} : job.pgNumbers,
+    sourceFilenames: [sourceFilename],
+    data: {
+      stages: { ...emptyStages(), stage1 },
+      output1,
+      outputs23: null,
+    },
+  };
+  return persist(next, job.step); // 현재 step을 expected로 CAS
 }
 
 // ============================================================================
@@ -186,15 +218,22 @@ export async function getJob(id: string): Promise<JobRecord | null> {
   if (!row) return null;
   const blobKey = row.blobKeys[0];
   const raw = blobKey ? await getBlobAsJson<JobData>(blobKey) : null;
+  // blobKey가 있는데 로드 실패(만료/네트워크/파싱) → 깨진 완료화면 대신 null(404, 새로고침 유도).
+  // 단 s1_uploaded 직후 등 blobKey 자체가 없는 경우는 빈 data 허용.
+  if (blobKey && raw === null) return null;
   const data = raw ? reviveData(raw) : { stages: emptyStages(), output1: null, outputs23: null };
+  // 내부 플래그 _etcAck는 클라이언트로 새지 않게 분리
+  const ho = { ...(row.headerOverrides as Record<string, string>) };
+  const etcAck = ho._etcAck === "1";
+  delete ho._etcAck;
   return {
     id: row.id,
     plnt: row.plnt,
     step: (row.step as JobStep) ?? "s1_uploaded",
     sourceFilenames: row.sourceFilenames,
     pgNumbers: row.pgNumbers,
-    headerOverrides: row.headerOverrides,
-    etcAcknowledged: !!(row.headerOverrides as Record<string, string>)._etcAck,
+    headerOverrides: ho,
+    etcAcknowledged: etcAck,
     createdByEmail: row.createdByEmail,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
@@ -218,11 +257,12 @@ async function persist(
     memory.set(rec.id, rec);
     return { ok: true, job: rec };
   }
-  // DB: blob 재작성 + step CAS
+  // DB: 고정 경로 blob 덮어쓰기(고아 방지) + step CAS.
+  // blob 키가 결정적(jobs/{id}/data.json)이라 CAS 충돌이 나도 blob은 같은 키라 고아 안 됨.
   const blob = await putBlob(
     `jobs/${rec.id}/data.json`,
     JSON.stringify(rec.data),
-    { contentType: "application/json" }
+    { contentType: "application/json", overwrite: true }
   );
   const ho: Record<string, string> = { ...rec.headerOverrides } as Record<string, string>;
   if (rec.etcAcknowledged) ho._etcAck = "1";
@@ -265,14 +305,10 @@ export async function attachStage(
     (stageN === 3 && ["s3_uploaded", "s4_uploaded", "ready"].includes(job.step)) ||
     (stageN === 4 && ["s4_uploaded", "ready"].includes(job.step));
 
-  let fromStep = job.step;
   let data = job.data;
   if (isReupload) {
-    data = applyInvalidation(data, stageN === 4 ? 4 : 3);
-    fromStep = invalidationFor(stageN === 4 ? 4 : 3).demoteTo;
-  }
-
-  if (!isReupload && !canTransition(job.step, toStep)) {
+    ({ data } = applyInvalidation(data, stageN === 4 ? 4 : 3));
+  } else if (!canTransition(job.step, toStep)) {
     return { ok: false, error: "illegal_transition" };
   }
 
@@ -292,7 +328,8 @@ export async function attachStage(
     ),
     data: nextData,
   };
-  return persist(next, isReupload ? null : job.step === fromStep ? job.step : fromStep);
+  // 정상 전이/재업로드 모두 현재 DB step을 expected로 CAS (동시성 보호 — 재업로드도 보호)
+  return persist(next, job.step);
 }
 
 // ============================================================================
@@ -323,7 +360,7 @@ export async function setPgNumbers(
     : out1;
   const next: JobRecord = {
     ...job,
-    step: job.step === "pg_entered" ? "pg_entered" : "pg_entered",
+    step: "pg_entered",
     pgNumbers: merged,
     data: { ...job.data, output1: mergedOut1 },
   };

@@ -29,8 +29,9 @@ export function JobControls({
   const [etcAck, setEtcAck] = useState(initialEtcAck);
   const [saving, setSaving] = useState(false);
 
+  /** PATCH 저장. 실패 시 onFail()로 낙관적 UI 롤백. */
   const patch = useCallback(
-    async (body: object) => {
+    async (body: object, onFail?: () => void) => {
       setSaving(true);
       try {
         const res = await fetch(`/api/jobs/${jobId}`, {
@@ -41,7 +42,11 @@ export function JobControls({
         if (!res.ok) {
           const b = await res.json().catch(() => ({ error: res.statusText }));
           toast.error(`저장 실패: ${b.error}`);
+          onFail?.();
         }
+      } catch (e) {
+        toast.error(`네트워크 오류: ${String(e)}`);
+        onFail?.();
       } finally {
         setSaving(false);
       }
@@ -51,9 +56,10 @@ export function JobControls({
 
   const onHeaderBlur = useCallback(
     (field: "docTitle" | "deliveryDate" | "footerLeft", value: string) => {
+      const prev = overrides;
       const next = { ...overrides, [field]: value };
       setOverrides(next);
-      void patch({ headerOverrides: { [field]: value } });
+      void patch({ headerOverrides: { [field]: value } }, () => setOverrides(prev));
     },
     [overrides, patch]
   );
@@ -61,7 +67,7 @@ export function JobControls({
   const onEtcToggle = useCallback(
     (checked: boolean) => {
       setEtcAck(checked);
-      void patch({ etcAcknowledged: checked });
+      void patch({ etcAcknowledged: checked }, () => setEtcAck(!checked));
     },
     [patch]
   );

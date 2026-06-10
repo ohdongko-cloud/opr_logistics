@@ -9,6 +9,7 @@ import { checkJobOwnership } from "@/lib/auth/ownership";
 import { getJob, setPgNumbers } from "@/lib/job/store";
 import { toJobView } from "@/lib/job/view";
 import { detectPlantPgConflict, validatePgInputs } from "@/lib/pg";
+import { clientIp, EDIT_LIMIT, rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,13 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  const rl = rateLimit(`pg:${clientIp(req)}`, EDIT_LIMIT.limit, EDIT_LIMIT.windowSeconds);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "rate_limited", retryAfterSeconds: rl.retryAfterSeconds },
+      { status: 429, headers: { "retry-after": String(rl.retryAfterSeconds ?? 60) } }
+    );
+  }
   const { id } = await ctx.params;
   const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });

@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { getCurrentEmail } from "@/lib/auth/session";
 import { createJobAtStep1 } from "@/lib/job/store";
 import { toJobView } from "@/lib/job/view";
+import { clientIp, rateLimit, UPLOAD_LIMIT } from "@/lib/rate-limit";
 import { resolveStage1 } from "@/lib/sheets/columns";
 import { asString, readCell } from "@/lib/sheets/rows";
 import { parseSingleStage } from "@/lib/upload/parse-single";
@@ -15,6 +16,13 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  const rl = rateLimit(`jobcreate:${clientIp(req)}`, UPLOAD_LIMIT.limit, UPLOAD_LIMIT.windowSeconds);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "rate_limited", retryAfterSeconds: rl.retryAfterSeconds },
+      { status: 429, headers: { "retry-after": String(rl.retryAfterSeconds ?? 60) } }
+    );
+  }
   let formData: FormData;
   try {
     formData = await req.formData();

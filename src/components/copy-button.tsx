@@ -15,11 +15,13 @@ export function CopyButton({
   label,
   values,
   count,
+  deduped = true,
   defaultFormat = "CRLF",
 }: {
   label: string;
   values: string[];
   count: number;
+  deduped?: boolean;
   defaultFormat?: NewlineFormat;
 }) {
   const [copied, setCopied] = useState(false);
@@ -54,7 +56,9 @@ export function CopyButton({
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm">
           <span className="font-medium">{label}</span>{" "}
-          <span className="text-xs text-[var(--color-muted)]">({count}건, 중복제거)</span>
+          <span className="text-xs text-[var(--color-muted)]">
+            ({count}건{deduped ? ", 중복제거" : ""})
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <select

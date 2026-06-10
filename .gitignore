@@ -69,3 +69,6 @@ logs
 # Local-only RAW samples (개발용)
 samples/
 tmp/
+
+# Claude Code 로컬 하네스 아티팩트
+.claude/

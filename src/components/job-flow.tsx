@@ -33,7 +33,17 @@ export interface JobView {
   expiresAt: string;
   totals: { stage1Y: number; output1Qty: number } | null;
   output1RowCount: number;
+  output1Rows: Array<{
+    purchaseGroup: string;
+    plnt: string;
+    outletName: string;
+    qty: number;
+    deliveryNo: string;
+    pgNumber: string;
+    brand: string;
+  }>;
   warningsCount: number;
+  warnings: string[];
   pageCount: number;
   etcCount: number;
   copy: CopyColumn[];
@@ -107,7 +117,7 @@ export function JobFlow({ initialView }: { initialView: JobView }) {
       {/* PG 입력됨: 출력1 미리보기 + PG 복사 + 3단계 업로드 */}
       {view.step === "pg_entered" && (
         <Section title="STEP 4 — 출력1 미리보기 + 피킹지시서 출력 입력값">
-          <Out1Summary view={view} />
+          <Out1Summary view={view} showTable />
           <CopyButton
             label="PG번호 (피킹지시서 출력용)"
             values={Object.values(view.pgNumbers)}
@@ -163,6 +173,35 @@ export function JobFlow({ initialView }: { initialView: JobView }) {
         </Section>
       )}
 
+      {/* 이전 단계 수정 — 앞 RAW 재업로드 (무효화 강등, 확인 모달) */}
+      {view.step !== "s1_uploaded" && view.step !== "s2_uploaded" && (
+        <details className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+          <summary className="cursor-pointer text-sm font-medium">
+            이전 단계 다시 업로드 (수정)
+          </summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <StageUpload
+              endpoint={`/api/jobs/${view.id}/stage?n=1`}
+              label="1단계 재업로드 (전체 초기화)"
+              hint="PG·출력1·2·3와 2~4단계가 모두 폐기되고 STEP1로 돌아갑니다."
+              confirmMessage="1단계를 다시 올리면 입력한 PG번호와 생성된 출력1·2·3, 이후 단계 업로드가 모두 삭제됩니다. 계속할까요?"
+              onDone={refresh}
+            />
+            {(view.step === "s3_uploaded" ||
+              view.step === "s4_uploaded" ||
+              view.step === "ready") && (
+              <StageUpload
+                endpoint={`/api/jobs/${view.id}/stage?n=3`}
+                label="3단계 재업로드"
+                hint="출력2·3와 4단계가 폐기되고 STEP5로 돌아갑니다."
+                confirmMessage="3단계를 다시 올리면 출력2·3와 4단계 업로드가 삭제됩니다. 계속할까요?"
+                onDone={refresh}
+              />
+            )}
+          </div>
+        </details>
+      )}
+
       <button
         type="button"
         onClick={() => router.refresh()}
@@ -205,13 +244,41 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Out1Summary({ view }: { view: JobView }) {
+function Out1Summary({ view, showTable }: { view: JobView; showTable?: boolean }) {
   if (!view.totals) return null;
   const ok = view.totals.stage1Y === view.totals.output1Qty;
   return (
-    <div className={`rounded-md px-3 py-2 text-xs ${ok ? "bg-emerald-50 text-emerald-900" : "bg-rose-50 text-rose-900"}`}>
-      출력1: {view.output1RowCount}행 · 수량합 {view.totals.output1Qty} (1단계 {view.totals.stage1Y}) {ok ? "✓ 정합" : "⚠ 불일치"}
-      {view.warningsCount > 0 ? ` · 경고 ${view.warningsCount}` : ""}
+    <div className="flex flex-col gap-2">
+      <div className={`rounded-md px-3 py-2 text-xs ${ok ? "bg-emerald-50 text-emerald-900" : "bg-rose-50 text-rose-900"}`}>
+        출력1: {view.output1RowCount}행 · 수량합 {view.totals.output1Qty} (1단계 {view.totals.stage1Y}) {ok ? "✓ 정합" : "⚠ 불일치"}
+        {view.warningsCount > 0 ? ` · 경고 ${view.warningsCount}` : ""}
+      </div>
+      {showTable && view.output1Rows.length > 0 && (
+        <div className="max-h-72 overflow-auto rounded-md border border-[var(--color-border)]">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-slate-100">
+              <tr className="text-left">
+                {["구매그룹", "플랜트", "출고지", "수량", "납품번호", "PG번호", "브랜드"].map((h) => (
+                  <th key={h} className="px-2 py-1 font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {view.output1Rows.map((r, i) => (
+                <tr key={i} className="border-t border-[var(--color-border)]">
+                  <td className="px-2 py-1">{r.purchaseGroup}</td>
+                  <td className="px-2 py-1">{r.plnt}</td>
+                  <td className="px-2 py-1">{r.outletName}</td>
+                  <td className="px-2 py-1 tabular-nums">{r.qty}</td>
+                  <td className="px-2 py-1 tabular-nums">{r.deliveryNo}</td>
+                  <td className="px-2 py-1 tabular-nums">{r.pgNumber || "—"}</td>
+                  <td className="px-2 py-1">{r.brand}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -237,6 +304,8 @@ function PgForm({ view, onDone }: { view: JobView; onDone: (v: unknown) => void 
       }
       toast.success("PG번호 저장됨");
       onDone(body.view);
+    } catch (e) {
+      toast.error(`네트워크 오류: ${String(e)}`);
     } finally {
       setBusy(false);
     }

@@ -10,6 +10,7 @@ import {
   createJobAtStep1,
   finalizeJob,
   getJob,
+  reuploadStage1,
   setPgNumbers,
 } from "./store";
 
@@ -144,5 +145,48 @@ describe("잡 생애주기 (인메모리)", () => {
 
   it("getJob: 없는 잡 null", async () => {
     expect(await getJob("nope")).toBeNull();
+  });
+
+  it("STEP1 재업로드: ready → s1로 강등 + PG/출력23 폐기 + 출력1 재생성", async () => {
+    const job = await createJobAtStep1({
+      stage1: STAGE1, sourceFilename: "1.xlsx", plnt: "8227", createdByEmail: null,
+    });
+    await setPgNumbers(job.id, { "8227": "1000191008" });
+    await attachStage(job.id, 3, STAGE3, "3.xlsx");
+    await attachStage(job.id, 4, STAGE4, "4.xlsx");
+    await finalizeJob(job.id);
+    let cur = await getJob(job.id);
+    expect(cur!.step).toBe("ready");
+
+    // 재업로드
+    const re = await reuploadStage1(job.id, STAGE1, "1b.xlsx");
+    expect(re.ok).toBe(true);
+    cur = await getJob(job.id);
+    expect(cur!.step).toBe("s1_uploaded");
+    expect(cur!.pgNumbers).toEqual({}); // PG 폐기
+    expect(cur!.data.outputs23).toBeNull(); // 출력2·3 폐기
+    expect(cur!.data.stages.stage3).toBeNull();
+    expect(cur!.data.stages.stage4).toBeNull();
+    expect(cur!.data.output1).not.toBeNull(); // 출력1 재생성
+    expect(cur!.data.output1!.totals.stage1Y).toBe(10);
+    expect(cur!.sourceFilenames).toEqual(["1b.xlsx"]);
+  });
+
+  it("3단계 재업로드: ready → s3로 강등 + 출력23/stage4 폐기", async () => {
+    const job = await createJobAtStep1({
+      stage1: STAGE1, sourceFilename: "1.xlsx", plnt: "8227", createdByEmail: null,
+    });
+    await setPgNumbers(job.id, { "8227": "1000191008" });
+    await attachStage(job.id, 3, STAGE3, "3.xlsx");
+    await attachStage(job.id, 4, STAGE4, "4.xlsx");
+    await finalizeJob(job.id);
+
+    const re = await attachStage(job.id, 3, STAGE3, "3b.xlsx");
+    expect(re.ok).toBe(true);
+    const cur = await getJob(job.id);
+    expect(cur!.step).toBe("s3_uploaded");
+    expect(cur!.data.outputs23).toBeNull();
+    expect(cur!.data.stages.stage4).toBeNull();
+    expect(cur!.pgNumbers).toEqual({ "8227": "1000191008" }); // PG는 유지
   });
 });

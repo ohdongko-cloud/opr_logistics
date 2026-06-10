@@ -28,6 +28,14 @@ export async function GET(
   const own = await checkJobOwnership(job);
   if (!own.ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
+  // 출력2·3가 생성된 ready 잡만 다운로드 허용 (부분 잡은 불완전 엑셀 방지)
+  if (job.step !== "ready" || !job.data.outputs23) {
+    return NextResponse.json(
+      { error: "not_ready", detail: "4단계까지 업로드 후 다운로드할 수 있습니다." },
+      { status: 409 }
+    );
+  }
+
   const { buffer, filename } = buildIntegratedWorkbook({ job });
 
   // 파일명에 한글 → RFC 5987 인코딩

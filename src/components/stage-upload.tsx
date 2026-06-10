@@ -9,16 +9,20 @@ export function StageUpload({
   label,
   hint,
   onDone,
+  confirmMessage,
 }: {
   endpoint: string;
   label: string;
   hint?: string;
   onDone: (view: unknown) => void;
+  /** 지정 시 업로드 전 확인 모달(무효화 경고) */
+  confirmMessage?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const submit = async (file: File) => {
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
     setBusy(true);
     try {
       const fd = new FormData();

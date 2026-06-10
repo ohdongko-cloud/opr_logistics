@@ -29,7 +29,7 @@ export interface PutResult {
 export async function putBlob(
   pathname: string,
   body: string | Uint8Array | ArrayBuffer,
-  opts: { contentType?: string } = {}
+  opts: { contentType?: string; overwrite?: boolean } = {}
 ): Promise<PutResult> {
   if (USE_BLOB) {
     // @vercel/blob v2는 PutBody에 Uint8Array를 직접 받지 않음 → Buffer로 변환
@@ -39,11 +39,12 @@ export async function putBlob(
         : body instanceof ArrayBuffer
           ? Buffer.from(new Uint8Array(body))
           : Buffer.from(body);
+    // overwrite=true: 고정 경로 덮어쓰기 (잡 데이터처럼 매번 갱신되는 객체 — 고아 blob 방지)
     const res = await blobPut(pathname, sdkBody, {
       access: "public",
       contentType: opts.contentType,
-      addRandomSuffix: true,
-      allowOverwrite: false,
+      addRandomSuffix: !opts.overwrite,
+      allowOverwrite: !!opts.overwrite,
     });
     return { url: res.url, key: res.url };
   }
