@@ -77,17 +77,36 @@ function furthestScreen(step: JobView["step"]): number {
   }
 }
 
+/** 업로드/전이 직후 착지할 "지금 할 일" 화면 (furthest와 별개) */
+function currentScreen(step: JobView["step"]): number {
+  switch (step) {
+    case "s1_uploaded":
+      return 0; // 1단계 결과 — 분배번호·자재 복사
+    case "s2_uploaded":
+      return 2; // PG 입력
+    case "pg_entered":
+      return 3; // 출력1 + PG번호 복사
+    case "s3_uploaded":
+      return 4; // 자재코드 복사 + 4단계 업로드
+    case "s4_uploaded":
+    case "ready":
+      return 6; // 최종
+    default:
+      return 0;
+  }
+}
+
 export function JobFlow({ initialView }: { initialView: JobView }) {
   const router = useRouter();
   const [view, setView] = useState<JobView>(initialView);
   const furthest = furthestScreen(view.step);
-  const [viewIdx, setViewIdx] = useState<number>(furthest);
+  const [viewIdx, setViewIdx] = useState<number>(currentScreen(initialView.step));
 
   const refresh = (v: unknown) => {
     const nv = v as JobView;
     setView(nv);
-    // 전이 후 새로 도달한 화면으로 이동
-    setViewIdx(furthestScreen(nv.step));
+    // 전이 후 "지금 할 일" 화면으로 이동
+    setViewIdx(currentScreen(nv.step));
   };
   const goto = (i: number) => setViewIdx(Math.max(0, Math.min(furthest, i)));
 

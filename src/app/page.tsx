@@ -17,21 +17,26 @@ export default function HomePage() {
         </p>
       </header>
 
-      <ol className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
-        <li className="font-medium text-slate-900">① 1단계 업로드</li>
-        <li>›</li>
-        <li>② 2단계(선택)</li>
-        <li>›</li>
-        <li>③ PG 입력</li>
-        <li>›</li>
-        <li>④ 출력1</li>
-        <li>›</li>
-        <li>⑤ 3단계</li>
-        <li>›</li>
-        <li>⑥ 4단계</li>
-        <li>›</li>
-        <li>⑦ 인쇄/다운로드</li>
-      </ol>
+      <div className="rounded-md bg-slate-50 px-4 py-3 text-xs text-[var(--color-muted)]">
+        <span className="font-medium text-slate-700">진행 단계 안내</span> — 1단계 파일을
+        업로드하면 작업이 시작되고, 그 안에서 단계 표시줄/화살표로 자유롭게 이동할 수 있습니다.
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {[
+            "① 1단계 업로드",
+            "② 2단계(선택)",
+            "③ PG 입력",
+            "④ 출력1",
+            "⑤ 3단계",
+            "⑥ 4단계",
+            "⑦ 인쇄/다운로드",
+          ].map((s, i) => (
+            <span key={s}>
+              <span className={i === 0 ? "font-medium text-slate-900" : ""}>{s}</span>
+              {i < 6 ? <span className="px-0.5">›</span> : null}
+            </span>
+          ))}
+        </div>
+      </div>
 
       <StepOneUpload />
     </main>
