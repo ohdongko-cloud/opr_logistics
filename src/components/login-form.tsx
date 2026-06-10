@@ -66,7 +66,7 @@ export function LoginForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="rounded-md border border-[var(--color-border)] bg-white px-3 py-2 text-sm"
-          placeholder="you@gmail.com"
+          placeholder="you@eland.co.kr"
         />
       </label>
       <button
