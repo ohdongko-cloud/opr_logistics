@@ -41,6 +41,7 @@ export function findColumnContains(
 export interface Stage1Cols {
   purchaseGroup: number; // C 구매 그룹
   delivery: number; // G 납품 (번호)
+  distributionNo: number; // M 분배번호 (PG생성/물류분배 입력 키)
   plnt: number; // I Plnt
   origBrand: number; // P 오리지날 브랜드 (코드)
   origBrandName: number; // Q 오리지날 브랜드명
@@ -52,7 +53,9 @@ export interface Stage1Cols {
 export function resolveStage1(headers: ReadonlyArray<string>): Stage1Cols {
   return {
     purchaseGroup: findColumn(headers, "구매 그룹", "구매그룹"),
-    delivery: findColumnContains(headers, "납품"),
+    // '납품'은 '미완료납품수량' 등과 substring 충돌하므로 정확매칭 우선
+    delivery: pickDelivery(headers),
+    distributionNo: findColumn(headers, "분배번호", "분배 번호"),
     plnt: findColumn(headers, "Plnt", "플랜트", "Plant"),
     origBrand: findColumn(headers, "오리지날 브랜드"),
     origBrandName: findColumn(headers, "오리지날 브랜드명"),
@@ -60,6 +63,16 @@ export function resolveStage1(headers: ReadonlyArray<string>): Stage1Cols {
     mcGroup: findColumnContains(headers, "MC(자재그룹)", "자재그룹"),
     totalQty: findColumn(headers, "합계"),
   };
+}
+
+/** '납품' 컬럼: 정확매칭 우선, 없으면 '미완료납품수량' 등 제외하고 substring */
+function pickDelivery(headers: ReadonlyArray<string>): number {
+  const exact = findColumn(headers, "납품");
+  if (exact >= 0) return exact;
+  const norm = headers.map(normalizeForSig);
+  return norm.findIndex(
+    (h) => h.includes(normalizeForSig("납품")) && !h.includes(normalizeForSig("수량"))
+  );
 }
 
 export interface Stage3Cols {
