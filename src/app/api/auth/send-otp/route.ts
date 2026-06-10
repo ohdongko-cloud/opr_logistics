@@ -77,12 +77,43 @@ export async function POST(req: Request) {
     } catch {
       // 무효화 실패는 무시 (어차피 10분 TTL)
     }
+    // nodemailer 에러 구조에서 진단 정보 추출 (PII 없음)
+    const e = err as {
+      code?: string;
+      command?: string;
+      responseCode?: number;
+      response?: string;
+      message?: string;
+    };
+    const maskedEmail = email.replace(/(.{2}).+(@.+)/, "$1***$2");
     console.error("[send-otp] SMTP error", {
-      email: email.replace(/(.{2}).+(@.+)/, "$1***$2"),
-      message: err instanceof Error ? err.message : String(err),
+      email: maskedEmail,
+      code: e.code,
+      command: e.command,
+      responseCode: e.responseCode,
+      response: e.response?.slice(0, 240),
+      message: e.message,
     });
+    // 사용자/디버깅용 카테고리 (PII/시크릿 미포함)
+    const category =
+      e.code === "EAUTH"
+        ? "smtp_auth_failed"
+        : e.code === "ECONNECTION" || e.code === "ETIMEDOUT"
+          ? "smtp_connection_failed"
+          : e.responseCode && e.responseCode >= 500 && e.responseCode < 600
+            ? "recipient_rejected"
+            : "smtp_failure";
     return NextResponse.json(
-      { ok: false, error: "smtp_failure" },
+      {
+        ok: false,
+        error: category,
+        // 운영에서도 진단 가능하도록 nodemailer 응답코드/명령은 노출 (시크릿 아님)
+        smtp: {
+          code: e.code ?? null,
+          command: e.command ?? null,
+          responseCode: e.responseCode ?? null,
+        },
+      },
       { status: 502 }
     );
   }
