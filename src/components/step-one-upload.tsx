@@ -4,8 +4,18 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
-/** STEP1: 1단계(STO) 업로드 → 잡 생성 → /jobs/[id] 이동 */
-export function StepOneUpload() {
+import type { JobView } from "@/components/job-flow";
+
+/**
+ * STEP1: 1단계(STO) 업로드 → 잡 생성.
+ * onCreated 있으면 라우트 이동 없이 인라인 콜백(홈 인라인 호스팅, PRD #0002 F12),
+ * 없으면 종전대로 /jobs/[id] 이동.
+ */
+export function StepOneUpload({
+  onCreated,
+}: {
+  onCreated?: (view: JobView) => void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -22,7 +32,11 @@ export function StepOneUpload() {
         return;
       }
       toast.success("1단계 업로드 완료");
-      router.push(`/jobs/${body.jobId}`);
+      if (onCreated && body.view) {
+        onCreated(body.view as JobView);
+      } else {
+        router.push(`/jobs/${body.jobId}`);
+      }
     } catch (e) {
       toast.error(`네트워크 오류: ${String(e)}`);
     } finally {
