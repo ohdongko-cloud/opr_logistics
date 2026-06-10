@@ -178,18 +178,36 @@ async function saveOtpDb(input: {
   };
 }
 
+/**
+ * verifyOtpDb — M9 race condition 차단 강화
+ *
+ * 핵심: 'attempts < 5 AND consumed_at IS NULL AND expires_at > now()' 조건을 *원자적으로*
+ * UPDATE 절에 포함해 시도횟수를 증가시키고, RETURNING으로 code_hash + 갱신된 attempts를
+ * 가져온다. 두 동시 요청이 들어와도 한 쪽은 갱신된 attempts를 본다.
+ *
+ *   UPDATE email_otps
+ *   SET attempts = attempts + 1
+ *   WHERE id = (
+ *       SELECT id FROM email_otps
+ *       WHERE email = $1 AND consumed_at IS NULL
+ *       ORDER BY created_at DESC LIMIT 1
+ *   )
+ *   AND attempts < 5 AND expires_at > now()
+ *   RETURNING code_hash, attempts, expires_at
+ */
 async function verifyOtpDb(
   email: string,
   verifyFn: (storedHash: string) => boolean
 ): Promise<VerifyResult> {
   const now = new Date();
-  const rows = await db
+  // 1) 가장 최근 미소비 row 조회 (만료/시도수 검사용)
+  const peek = await db
     .select()
     .from(otpsTable)
     .where(and(eq(otpsTable.email, email), isNull(otpsTable.consumedAt)))
     .orderBy(desc(otpsTable.createdAt))
     .limit(1);
-  const rec = rows[0];
+  const rec = peek[0];
   if (!rec) return { ok: false, reason: "not_found" };
   if (rec.expiresAt.getTime() < now.getTime()) {
     await db
@@ -201,19 +219,42 @@ async function verifyOtpDb(
   if (rec.attempts >= OTP_MAX_ATTEMPTS) {
     return { ok: false, reason: "too_many_attempts" };
   }
-  // 시도 횟수 +1 (성공/실패 무관) — race condition 회피 위해 raw SQL
-  await db
+
+  // 2) attempts +1을 조건부 atomic UPDATE — race condition 시 다른 쪽이 이미 증가시켰을 수 있음
+  const claimed = await db
     .update(otpsTable)
     .set({ attempts: drizzleSql`${otpsTable.attempts} + 1` })
-    .where(eq(otpsTable.id, rec.id));
+    .where(
+      and(
+        eq(otpsTable.id, rec.id),
+        isNull(otpsTable.consumedAt),
+        drizzleSql`${otpsTable.attempts} < ${OTP_MAX_ATTEMPTS}`
+      )
+    )
+    .returning({
+      id: otpsTable.id,
+      codeHash: otpsTable.codeHash,
+      attempts: otpsTable.attempts,
+    });
+  if (claimed.length === 0) {
+    // 동시 요청에 의해 이미 max attempts 초과 또는 consumed
+    return { ok: false, reason: "too_many_attempts" };
+  }
+  const c = claimed[0]!;
 
-  if (!verifyFn(rec.codeHash)) {
+  if (!verifyFn(c.codeHash)) {
     return { ok: false, reason: "mismatch" };
   }
-  await db
+  // 3) consumed 마킹 — 검증 통과 케이스에만
+  const consumed = await db
     .update(otpsTable)
     .set({ consumedAt: now })
-    .where(eq(otpsTable.id, rec.id));
+    .where(and(eq(otpsTable.id, c.id), isNull(otpsTable.consumedAt)))
+    .returning({ id: otpsTable.id });
+  if (consumed.length === 0) {
+    // 다른 동시 요청이 이미 consumed — 재사용 방지
+    return { ok: false, reason: "not_found" };
+  }
   return { ok: true };
 }
 
@@ -243,6 +284,23 @@ export async function verifyOtp(
 /** 테스트용 — 메모리만 비움 (DB 모드에선 무효) */
 export function clearOtpStore(): void {
   memory.clear();
+}
+
+/**
+ * 가장 최근 미소비 OTP를 consumed로 마킹 — SMTP 실패 시 throttle 회피용 (M9)
+ */
+export async function invalidateLastOtp(email: string): Promise<void> {
+  if (USE_DB) {
+    await db
+      .update(otpsTable)
+      .set({ consumedAt: new Date() })
+      .where(and(eq(otpsTable.email, email), isNull(otpsTable.consumedAt)));
+    return;
+  }
+  const rec = memory.get(email);
+  if (rec && !rec.consumedAt) {
+    rec.consumedAt = new Date();
+  }
 }
 
 export function otpStoreMode(): "db" | "memory" {

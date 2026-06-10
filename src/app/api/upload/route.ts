@@ -12,6 +12,7 @@
  */
 import { NextResponse } from "next/server";
 
+import { getCurrentEmail } from "@/lib/auth/session";
 import { processJob } from "@/lib/generate/process";
 import { staticOutletResolver } from "@/lib/job/plants";
 import { createJob } from "@/lib/job/store";
@@ -53,8 +54,11 @@ export async function POST(req: Request) {
   try {
     formData = await req.formData();
   } catch (err) {
+    // 운영에선 detail 노출 금지 (multipart parser 내부 경로/스택 누출 회피)
+    const detail =
+      process.env.NODE_ENV === "production" ? undefined : String(err);
     return NextResponse.json(
-      { error: "form-data 파싱 실패", detail: String(err) },
+      { error: "form-data 파싱 실패", detail },
       { status: 400 }
     );
   }
@@ -168,12 +172,22 @@ export async function POST(req: Request) {
       });
     } catch (err) {
       workbooks.push(null);
+      const errMsg =
+        process.env.NODE_ENV === "production"
+          ? "parse_failed"
+          : String(err instanceof Error ? err.message : err);
+      // 서버 로그에는 상세 보관 (PII 마스킹)
+      console.error("[upload] parse error", {
+        fileIndex: i,
+        filename: file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_"),
+        message: err instanceof Error ? err.message : String(err),
+      });
       fileSummaries.push({
         fileIndex: i,
         filename: file.name,
         sizeBytes: file.size,
         sheets: [],
-        errors: [String(err instanceof Error ? err.message : err)],
+        errors: [errMsg],
       });
       detections.push({
         fileIndex: i,
@@ -237,6 +251,7 @@ export async function POST(req: Request) {
           outletResolver: staticOutletResolver,
         });
         const plnt = processed.detectedPlants[0] ?? "8227";
+        const createdByEmail = await getCurrentEmail();
         const job = await createJob({
           plnt,
           outletName: processed.outletName,
@@ -249,15 +264,18 @@ export async function POST(req: Request) {
           },
           processed,
           rawSheets: { stage1: s1, stage2: s2, stage3: s3, stage4: s4 },
+          createdByEmail,
         });
         jobId = job.id;
         totals = processed.totals;
         warnings = processed.warnings;
       }
     } catch (err) {
-      warnings.push(
-        `잡 처리 실패: ${err instanceof Error ? err.message : String(err)}`
-      );
+      console.error("[upload] job processing failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      // 운영에선 상세 노출 금지
+      warnings.push("잡 처리 실패");
     }
   }
 

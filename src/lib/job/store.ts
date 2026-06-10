@@ -7,7 +7,7 @@
  *   Blob 백엔드는 raw-sheets + processed 를 하나의 JSON으로 묶어 저장한다.
  *   BLOB_READ_WRITE_TOKEN 환경변수가 없으면 인메모리 메모리 폴백(blob/storage.ts).
  */
-import { eq, lte } from "drizzle-orm";
+import { eq, lte, sql as drizzleSql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { db } from "@/db";
@@ -49,6 +49,8 @@ export interface JobRecord {
     footerLeft?: string;
   };
   etcAcknowledged: boolean;
+  /** 잡 소유자 (M9: IDOR 차단) */
+  createdByEmail: string | null;
   createdAt: Date;
   expiresAt: Date;
 }
@@ -60,6 +62,8 @@ export interface CreateJobInput {
   detectedSheets: Record<RawStage, string | null>;
   processed: ProcessedJob;
   rawSheets: JobRecord["rawSheets"];
+  /** 인증된 사용자 이메일 (M9: IDOR 차단) */
+  createdByEmail: string | null;
 }
 
 type JobPatch = Partial<
@@ -92,6 +96,7 @@ function newJobRecord(input: CreateJobInput): JobRecord {
     pgNumbers: {},
     headerOverrides: {},
     etcAcknowledged: false,
+    createdByEmail: input.createdByEmail,
     createdAt: now,
     expiresAt,
   };
@@ -164,7 +169,7 @@ async function createJobDb(input: CreateJobInput): Promise<JobRecord> {
     contentType: "application/json",
   });
 
-  // 2) DB row 삽입
+  // 2) DB row 삽입 (M9: createdByEmail 채움 — IDOR 차단)
   const inserted = await db
     .insert(jobsTable)
     .values({
@@ -175,6 +180,7 @@ async function createJobDb(input: CreateJobInput): Promise<JobRecord> {
       blobKeys: [blob.key],
       pgNumbers: {},
       headerOverrides: {},
+      createdByEmail: input.createdByEmail,
     })
     .returning();
   const row = inserted[0]!;
@@ -190,6 +196,7 @@ async function createJobDb(input: CreateJobInput): Promise<JobRecord> {
     pgNumbers: row.pgNumbers,
     headerOverrides: row.headerOverrides,
     etcAcknowledged: false, // M8: 별도 컬럼 추가 전엔 headerOverrides 안에 보관
+    createdByEmail: row.createdByEmail,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
   };
@@ -232,41 +239,54 @@ async function getJobDb(id: string): Promise<JobRecord | null> {
     pgNumbers: row.pgNumbers,
     headerOverrides: row.headerOverrides,
     etcAcknowledged: !!row.headerOverrides._etcAck, // hack: 별도 컬럼 추가 전 임시 보관
+    createdByEmail: row.createdByEmail,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
   };
 }
 
+/**
+ * updateJobDb — M9 PATCH race condition 차단
+ *
+ * 기존: SELECT → JS merge → UPDATE (3 round-trip, lost update 위험)
+ * 개선: Postgres jsonb || 연산자로 *DB 측에서* atomic merge.
+ *   UPDATE jobs SET
+ *     pg_numbers = pg_numbers || $1::jsonb,
+ *     header_overrides = header_overrides || $2::jsonb
+ *   WHERE id = $3
+ * → 두 요청이 동시에 들어와도 마지막 쓰기가 이전 쓰기를 덮어쓰는 게 아니라 *추가*됨.
+ *   (값이 같은 키면 last-write-wins, 다른 키면 둘 다 보존)
+ */
 async function updateJobDb(
   id: string,
   patch: JobPatch
 ): Promise<JobRecord | null> {
-  // 기존 행을 가져와서 부분 머지
-  const existing = await db
-    .select()
-    .from(jobsTable)
-    .where(eq(jobsTable.id, id))
-    .limit(1);
-  const row = existing[0];
-  if (!row) return null;
+  // 빈 patch면 단순 select
+  const hasUpdates =
+    patch.pgNumbers !== undefined ||
+    patch.headerOverrides !== undefined ||
+    patch.etcAcknowledged !== undefined;
+  if (!hasUpdates) return getJobDb(id);
 
-  const nextPg = patch.pgNumbers
-    ? { ...row.pgNumbers, ...patch.pgNumbers }
-    : row.pgNumbers;
-  const nextHo: Record<string, string | undefined> = patch.headerOverrides
-    ? { ...row.headerOverrides, ...patch.headerOverrides }
-    : { ...row.headerOverrides };
+  // header_overrides 머지에 _etcAck도 함께 포함
+  const hoPatch: Record<string, string | undefined> = {
+    ...(patch.headerOverrides ?? {}),
+  };
   if (patch.etcAcknowledged !== undefined) {
-    nextHo._etcAck = patch.etcAcknowledged ? "1" : "";
+    hoPatch._etcAck = patch.etcAcknowledged ? "1" : "";
   }
 
-  await db
+  const pgJson = JSON.stringify(patch.pgNumbers ?? {});
+  const hoJson = JSON.stringify(hoPatch);
+  const updated = await db
     .update(jobsTable)
     .set({
-      pgNumbers: nextPg,
-      headerOverrides: nextHo as Record<string, string>,
+      pgNumbers: drizzleSql`${jobsTable.pgNumbers} || ${pgJson}::jsonb`,
+      headerOverrides: drizzleSql`${jobsTable.headerOverrides} || ${hoJson}::jsonb`,
     })
-    .where(eq(jobsTable.id, id));
+    .where(eq(jobsTable.id, id))
+    .returning({ id: jobsTable.id });
+  if (updated.length === 0) return null;
 
   return getJobDb(id);
 }

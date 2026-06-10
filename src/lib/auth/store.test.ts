@@ -9,7 +9,7 @@ import { hashOtpCode, verifyOtpHash } from "./otp";
 
 const orig = process.env.OTP_PEPPER;
 beforeEach(() => {
-  process.env.OTP_PEPPER = "test_store_pepper";
+  process.env.OTP_PEPPER = "test_store_pepper_padding_xxxxxxxxxxxxxxxxxxxxx";
   clearOtpStore();
 });
 afterEach(() => {

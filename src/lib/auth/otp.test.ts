@@ -9,7 +9,7 @@ import {
 const orig = process.env.OTP_PEPPER;
 
 beforeEach(() => {
-  process.env.OTP_PEPPER = "test_pepper_unit";
+  process.env.OTP_PEPPER = "0".repeat(32) + "_test_pepper_unit_padding_xxx";
 });
 afterEach(() => {
   if (orig === undefined) delete process.env.OTP_PEPPER;
@@ -41,6 +41,11 @@ describe("OTP code", () => {
   it("hashOtpCode throws if pepper missing", () => {
     delete process.env.OTP_PEPPER;
     expect(() => hashOtpCode("123456")).toThrowError();
+  });
+
+  it("hashOtpCode throws if pepper too short (<32)", () => {
+    process.env.OTP_PEPPER = "tooshort";
+    expect(() => hashOtpCode("123456")).toThrowError(/32자/);
   });
 
   it("verifyOtpHash timing-safe matches", () => {

@@ -18,6 +18,7 @@ import * as XLSX from "xlsx";
 import { formatDateCompact, formatDateDot } from "@/lib/dates";
 import type { JobRecord } from "@/lib/job/store";
 import type { ParsedSheet } from "@/lib/parser/xlsx";
+import { sanitizeAoa } from "./sanitize";
 
 /** RAW 시트를 양식 그대로 (헤더+행) 새 워크북에 추가 */
 function rawSheetToAoa(sheet: ParsedSheet): (string | number | boolean | null)[][] {
@@ -42,27 +43,27 @@ export function buildIntegratedWorkbook(input: ExportInput): {
   const { job, rawSheets } = input;
   const wb = XLSX.utils.book_new();
 
-  // RAW 1~4
+  // RAW 1~4 (M9: formula injection 방어 위해 sanitize)
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.aoa_to_sheet(rawSheetToAoa(rawSheets.stage1)),
+    XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage1))),
     "1단계(STO)"
   );
   if (rawSheets.stage2) {
     XLSX.utils.book_append_sheet(
       wb,
-      XLSX.utils.aoa_to_sheet(rawSheetToAoa(rawSheets.stage2)),
+      XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage2))),
       "2단계(물류분배)"
     );
   }
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.aoa_to_sheet(rawSheetToAoa(rawSheets.stage3)),
+    XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage3))),
     "3단계(피킹지시서패션)"
   );
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.aoa_to_sheet(rawSheetToAoa(rawSheets.stage4)),
+    XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage4))),
     "4단계(EAN)"
   );
 
@@ -79,7 +80,7 @@ export function buildIntegratedWorkbook(input: ExportInput): {
   ]);
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.aoa_to_sheet([out1Header, ...out1Rows]),
+    XLSX.utils.aoa_to_sheet(sanitizeAoa([out1Header, ...out1Rows])),
     "출력1. 관리용 문서"
   );
 
@@ -116,7 +117,7 @@ export function buildIntegratedWorkbook(input: ExportInput): {
   // 인쇄용이라 엑셀에는 단순 헤더만 둔다.
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.aoa_to_sheet([out2Header, ...out2Rows]),
+    XLSX.utils.aoa_to_sheet(sanitizeAoa([out2Header, ...out2Rows])),
     "출력2. 피킹지시서"
   );
 
@@ -126,7 +127,9 @@ export function buildIntegratedWorkbook(input: ExportInput): {
   const out3Rows = job.processed.output3.map((r) => [r.brand, r.sourceBin]);
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.aoa_to_sheet([[out3HeaderLine, ""], out3Header, ...out3Rows]),
+    XLSX.utils.aoa_to_sheet(
+      sanitizeAoa([[out3HeaderLine, ""], out3Header, ...out3Rows])
+    ),
     "출력3. 파렛트"
   );
 
@@ -155,7 +158,7 @@ export function buildIntegratedWorkbook(input: ExportInput): {
   ]);
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.aoa_to_sheet([etcHeader, ...etcRows]),
+    XLSX.utils.aoa_to_sheet(sanitizeAoa([etcHeader, ...etcRows])),
     "ETC 리포트"
   );
 

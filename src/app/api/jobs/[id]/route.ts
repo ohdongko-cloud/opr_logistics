@@ -7,21 +7,26 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { checkJobOwnership } from "@/lib/auth/ownership";
 import { getJob, updateJob } from "@/lib/job/store";
 import { detectPlantPgConflict, validatePgInputs } from "@/lib/pg";
 
 export const runtime = "nodejs";
 
-const PatchSchema = z.object({
-  pgNumbers: z.record(z.string(), z.string()).optional(),
-  headerOverrides: z
-    .object({
-      docTitle: z.string().max(200).optional(),
-      deliveryDate: z.string().max(20).optional(),
-      footerLeft: z.string().max(200).optional(),
-    })
-    .optional(),
-});
+const PatchSchema = z
+  .object({
+    pgNumbers: z.record(z.string(), z.string()).optional(),
+    headerOverrides: z
+      .object({
+        docTitle: z.string().max(200).optional(),
+        deliveryDate: z.string().max(20).optional(),
+        footerLeft: z.string().max(200).optional(),
+      })
+      .strict()
+      .optional(),
+    etcAcknowledged: z.boolean().optional(),
+  })
+  .strict();
 
 export async function GET(
   _req: Request,
@@ -30,6 +35,9 @@ export async function GET(
   const { id } = await ctx.params;
   const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const own = await checkJobOwnership(job);
+  // IDOR 차단 — 존재 여부 누출 방지를 위해 403 대신 404로 응답
+  if (!own.ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
   return NextResponse.json({
     id: job.id,
     plnt: job.plnt,
@@ -53,6 +61,8 @@ export async function PATCH(
   const { id } = await ctx.params;
   const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const own = await checkJobOwnership(job);
+  if (!own.ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   let body: unknown;
   try {
@@ -62,8 +72,13 @@ export async function PATCH(
   }
   const parsed = PatchSchema.safeParse(body);
   if (!parsed.success) {
+    // 운영에선 detail 노출 금지 (내부 필드 누출 회피)
+    const detail =
+      process.env.NODE_ENV === "production"
+        ? undefined
+        : parsed.error.flatten();
     return NextResponse.json(
-      { error: "validation", detail: parsed.error.flatten() },
+      { error: "validation", detail },
       { status: 400 }
     );
   }
@@ -95,6 +110,7 @@ export async function PATCH(
   const updated = await updateJob(id, {
     pgNumbers: parsed.data.pgNumbers,
     headerOverrides: parsed.data.headerOverrides,
+    etcAcknowledged: parsed.data.etcAcknowledged,
   });
 
   return NextResponse.json({

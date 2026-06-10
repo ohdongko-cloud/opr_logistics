@@ -6,6 +6,7 @@
  */
 import { NextResponse } from "next/server";
 
+import { checkJobOwnership } from "@/lib/auth/ownership";
 import { buildIntegratedWorkbook } from "@/lib/export/xlsx-export";
 import { getJob } from "@/lib/job/store";
 
@@ -13,12 +14,19 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  // CSRF/cross-site 방어 — 외부 사이트 링크 클릭으로 인증된 다운로드 차단
+  const sfs = req.headers.get("sec-fetch-site");
+  if (sfs && sfs !== "same-origin" && sfs !== "same-site" && sfs !== "none") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const { id } = await ctx.params;
   const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const own = await checkJobOwnership(job);
+  if (!own.ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const { buffer, filename } = buildIntegratedWorkbook({
     job,

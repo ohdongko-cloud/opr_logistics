@@ -7,6 +7,7 @@
 import { notFound } from "next/navigation";
 
 import { PgInputForm } from "@/components/pg-input-form";
+import { checkJobOwnership } from "@/lib/auth/ownership";
 import { getJob } from "@/lib/job/store";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ export default async function PgInputPage({
   const { id } = await params;
   const job = await getJob(id);
   if (!job) notFound();
+  const own = await checkJobOwnership(job);
+  if (!own.ok) notFound();
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">

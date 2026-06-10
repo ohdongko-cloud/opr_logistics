@@ -13,6 +13,7 @@ import { notFound } from "next/navigation";
 
 import { JobControls } from "@/components/job-controls";
 import { PickingPage } from "@/components/print/picking-page";
+import { checkJobOwnership } from "@/lib/auth/ownership";
 import { formatDateDot, formatMmDd, formatPrintTimestamp } from "@/lib/dates";
 import { getJob } from "@/lib/job/store";
 
@@ -26,6 +27,8 @@ export default async function JobPreviewPage({
   const { id } = await params;
   const job = await getJob(id);
   if (!job) notFound();
+  const own = await checkJobOwnership(job);
+  if (!own.ok) notFound();
 
   const today = new Date();
   const timestamp = formatPrintTimestamp(today);

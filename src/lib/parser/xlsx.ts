@@ -85,13 +85,26 @@ export function parseWorkbook(
     const ws = wb.Sheets[sheetName];
     if (!ws) continue;
 
+    // M9: OOM 사전 차단 — sheet_to_json 호출 *전* 에 시트 ref로 행 수 확인.
+    // ZIP bomb으로 sheet_to_json이 수십 GB 객체를 만드는 것을 막는다.
+    const ref = ws["!ref"];
+    if (ref) {
+      const range = XLSX.utils.decode_range(ref);
+      const declaredRows = range.e.r - range.s.r + 1;
+      if (declaredRows > maxRows) {
+        throw new Error(
+          `시트 '${sheetName}'의 행 수가 ${declaredRows}로 상한 ${maxRows}을 초과합니다.`
+        );
+      }
+    }
+
     const rawRows = XLSX.utils.sheet_to_json<
       (string | number | boolean | null)[]
     >(ws, { header: 1, defval: null, raw: false, blankrows: false });
 
     if (rawRows.length > maxRows) {
       throw new Error(
-        `시트 '${sheetName}'의 행 수가 ${rawRows.length}로 상한 ${maxRows}을 초과합니다.`
+        `시트 '${sheetName}'의 실제 행 수가 ${rawRows.length}로 상한 ${maxRows}을 초과합니다.`
       );
     }
 

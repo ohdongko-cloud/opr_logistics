@@ -23,6 +23,11 @@ function getSecretKey(): Uint8Array {
   if (!s) {
     throw new Error("SESSION_SECRET 환경변수가 설정되지 않았습니다.");
   }
+  if (s.length < 32) {
+    throw new Error(
+      "SESSION_SECRET 은 최소 32자 이상이어야 합니다. node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\" 로 재생성하세요."
+    );
+  }
   return new TextEncoder().encode(s);
 }
 

@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { isEmailAllowed, normalizeEmail } from "@/lib/auth/allowlist";
 import { generateOtpCode, hashOtpCode } from "@/lib/auth/otp";
-import { canSendOtp, saveOtp } from "@/lib/auth/store";
+import { canSendOtp, invalidateLastOtp, saveOtp } from "@/lib/auth/store";
 import { sendOtpEmail } from "@/lib/email/smtp";
 
 export const runtime = "nodejs";
@@ -32,10 +32,19 @@ export async function POST(req: Request) {
   }
   const email = normalizeEmail(parsed.data.email);
 
-  // 화이트리스트 검증 — 정보 누출 방지를 위해 응답은 동일하게
-  // (대신 발송도 안 함)
+  // 화이트리스트 검증 — 정보 누출 방지를 위해 응답은 동일하게.
+  // M9: 타이밍 누출 방어 — 비허용 케이스도 더미 hash 계산 + 200~500ms 랜덤 지연
   if (!isEmailAllowed(email)) {
-    // 같은 응답으로 enumeration 방지. 단, 실제 발송 안 함.
+    // 더미 HMAC 1회 — allowed 케이스의 발송 비용을 흉내
+    try {
+      const { hashOtpCode } = await import("@/lib/auth/otp");
+      hashOtpCode("000000");
+    } catch {
+      // OTP_PEPPER 미설정 등은 무시
+    }
+    // 200~500ms 랜덤 지연
+    const delay = 200 + Math.floor(Math.random() * 300);
+    await new Promise((r) => setTimeout(r, delay));
     return NextResponse.json({ ok: true, throttled: false });
   }
 
@@ -62,7 +71,12 @@ export async function POST(req: Request) {
   try {
     await sendOtpEmail({ to: email, code, ip });
   } catch (err) {
-    // SMTP 오류는 OTP를 저장한 채로 응답. 사용자는 재발송 시도 가능.
+    // M9: SMTP 실패 시 방금 저장한 OTP를 즉시 무효화 — 사용자가 재발송할 때 throttle 차단 회피
+    try {
+      await invalidateLastOtp(email);
+    } catch {
+      // 무효화 실패는 무시 (어차피 10분 TTL)
+    }
     console.error("[send-otp] SMTP error", {
       email: email.replace(/(.{2}).+(@.+)/, "$1***$2"),
       message: err instanceof Error ? err.message : String(err),
