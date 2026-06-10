@@ -16,6 +16,9 @@ const PROTECTED_PAGE_PREFIXES = ["/jobs"];
 const PROTECTED_API_PREFIXES = ["/api/jobs", "/api/upload"];
 
 function isProtected(pathname: string): { kind: "page" | "api" | null } {
+  // 메인 페이지(/) 도 보호 — 미인증 사용자가 업로드 UI를 보고 "로그인 안내가 없네?" 라고
+  // 혼동하는 것을 막기 위해. /login, /login/verify, /api/auth/*, /api/cron/* 만 통과.
+  if (pathname === "/") return { kind: "page" };
   if (PROTECTED_PAGE_PREFIXES.some((p) => pathname.startsWith(p))) {
     return { kind: "page" };
   }
@@ -52,6 +55,7 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
+    "/",
     "/jobs/:path*",
     "/api/jobs/:path*",
     "/api/upload",
