@@ -31,7 +31,20 @@ export function LoginForm() {
           }
           if (!res.ok) {
             const body = await res.json().catch(() => ({}));
-            toast.error(`발송 실패: ${body.error ?? res.statusText}`);
+            const code = body.error ?? res.statusText;
+            const smtp = body.smtp;
+            const hint =
+              code === "recipient_rejected"
+                ? "수신측 메일서버가 거부했습니다 (스팸/정책)."
+                : code === "smtp_auth_failed"
+                  ? "SMTP 자격증명 오류 — 앱 비밀번호를 확인하세요."
+                  : code === "smtp_connection_failed"
+                    ? "SMTP 서버에 연결 실패."
+                    : "메일 발송 실패";
+            const detail = smtp
+              ? ` (SMTP code=${smtp.code ?? "-"} responseCode=${smtp.responseCode ?? "-"})`
+              : "";
+            toast.error(`${hint}${detail}`);
             return;
           }
           toast.success("이메일을 확인해주세요. 6자리 코드가 발송되었습니다.");
