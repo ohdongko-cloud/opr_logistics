@@ -70,6 +70,24 @@ export async function GET(req: Request) {
     });
   }
 
+  // 접속 로그 90일 정리 (PRD #0003 §10.6)
+  let deletedLogs = 0;
+  if (storeMode() === "db") {
+    try {
+      const { sql } = await import("drizzle-orm");
+      const res = await db.execute(
+        sql`DELETE FROM login_logs WHERE at < now() - interval '90 days'`
+      );
+      deletedLogs =
+        (res as unknown as { rowCount?: number }).rowCount ?? 0;
+    } catch (err) {
+      errors.push({
+        stage: "delete_login_logs",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // DB 모드일 때만 cleanup_log 기록 (인메모리 폴백에선 무의미)
   if (storeMode() === "db") {
     try {
@@ -108,6 +126,7 @@ export async function GET(req: Request) {
     storeMode: storeMode(),
     deletedJobs,
     deletedBlobs,
+    deletedLogs,
     elapsedMs,
     errors,
   });

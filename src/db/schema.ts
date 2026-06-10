@@ -147,8 +147,49 @@ export const sessions = pgTable(
 );
 
 // ============================================================================
+// users — 회원 + 역할 (PRD #0003 F1)
+// email은 항상 normalizeEmail(소문자+trim)로 저장.
+// ============================================================================
+export const users = pgTable(
+  "users",
+  {
+    email: text("email").primaryKey(),
+    role: text("role").notNull().default("user"), // master|admin|user
+    status: text("status").notNull().default("active"), // active|withdrawn
+    invitedBy: text("invited_by"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  },
+  (t) => [index("users_role_idx").on(t.role)]
+);
+
+// ============================================================================
+// login_logs — 접속 로그 (PRD #0003 F2). 90일 후 cron 정리.
+// ============================================================================
+export const loginLogs = pgTable(
+  "login_logs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    email: text("email").notNull(),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    success: boolean("success").notNull(),
+    // success|wrong_code|expired|too_many_attempts|not_allowed|withdrawn
+    reason: text("reason"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("login_logs_at_idx").on(t.at)]
+);
+
+// ============================================================================
 // Types
 // ============================================================================
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type LoginLog = typeof loginLogs.$inferSelect;
+
 export type Plant = typeof plants.$inferSelect;
 export type NewPlant = typeof plants.$inferInsert;
 

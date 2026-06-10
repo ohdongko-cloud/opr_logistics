@@ -12,14 +12,21 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { SESSION_COOKIE_NAME, verifySession } from "@/lib/auth/session";
 
-const PROTECTED_PAGE_PREFIXES = ["/jobs"];
-// /api/jobs 는 생성·단계업로드·PG·다운로드 모두 포함 (하위 경로 전부 보호)
-const PROTECTED_API_PREFIXES = ["/api/jobs"];
+const PROTECTED_PAGE_PREFIXES = ["/jobs", "/admin"];
+// /api/jobs, /api/admin(역할 라우트) 하위 전부 보호. 단 CRON_SECRET 자체검증 디버그 라우트는 예외.
+const PROTECTED_API_PREFIXES = ["/api/jobs", "/api/admin"];
+// 세션 미보유 curl로 호출하는 디버그 라우트 — 미들웨어 인증 면제(핸들러가 CRON_SECRET 검사)
+const CRON_DEBUG_ROUTES = [
+  "/api/admin/smtp-test",
+  "/api/admin/db-introspect",
+  "/api/admin/allowlist-check",
+];
 
 function isProtected(pathname: string): { kind: "page" | "api" | null } {
-  // 메인 페이지(/) 도 보호 — 미인증 사용자가 업로드 UI를 보고 "로그인 안내가 없네?" 라고
-  // 혼동하는 것을 막기 위해. /login, /login/verify, /api/auth/*, /api/cron/* 만 통과.
   if (pathname === "/") return { kind: "page" };
+  if (CRON_DEBUG_ROUTES.some((p) => pathname.startsWith(p))) {
+    return { kind: null }; // CRON_SECRET 자체검증에 위임
+  }
   if (PROTECTED_PAGE_PREFIXES.some((p) => pathname.startsWith(p))) {
     return { kind: "page" };
   }
@@ -58,7 +65,10 @@ export const config = {
   matcher: [
     "/",
     "/jobs/:path*",
+    "/admin/:path*",
+    "/admin",
     "/api/jobs/:path*",
     "/api/jobs",
+    "/api/admin/:path*",
   ],
 };

@@ -11,8 +11,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { isEmailAllowed, normalizeEmail } from "@/lib/auth/allowlist";
+import { normalizeEmail } from "@/lib/auth/allowlist";
 import { generateOtpCode, hashOtpCode } from "@/lib/auth/otp";
+import { checkLoginAllowed } from "@/lib/auth/roles";
 import { canSendOtp, invalidateLastOtp, saveOtp } from "@/lib/auth/store";
 import { sendOtpEmail } from "@/lib/email/smtp";
 
@@ -59,8 +60,9 @@ export async function POST(req: Request) {
     }
     const email = normalizeEmail(parsed.data.email);
 
-    // 화이트리스트 검증 — enumeration 방지 위해 동일 200 응답 + 더미 지연
-    if (!isEmailAllowed(email)) {
+    // 로그인 허용 검증(withdrawn/미허용 차단) — enumeration 방지 위해 동일 200 + 더미 지연
+    const allowed = await checkLoginAllowed(email);
+    if (!allowed.ok) {
       try {
         hashOtpCode("000000");
       } catch {

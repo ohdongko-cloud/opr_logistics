@@ -415,6 +415,58 @@ export async function updateJobMeta(
 }
 
 // ============================================================================
+// 관리 — 전체 잡 목록(메타데이터만, blob 미로드) (PRD #0003 §5.4)
+// ============================================================================
+export interface JobMeta {
+  id: string;
+  plnt: string;
+  step: JobStep;
+  createdByEmail: string | null;
+  sourceFilenames: string[];
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export async function listAllJobs(limit = 200): Promise<JobMeta[]> {
+  if (!USE_DB) {
+    return Array.from(memory.values())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit)
+      .map((j) => ({
+        id: j.id,
+        plnt: j.plnt,
+        step: j.step,
+        createdByEmail: j.createdByEmail,
+        sourceFilenames: j.sourceFilenames,
+        createdAt: j.createdAt,
+        expiresAt: j.expiresAt,
+      }));
+  }
+  const rows = await db
+    .select({
+      id: jobsTable.id,
+      plnt: jobsTable.plnt,
+      step: jobsTable.step,
+      createdByEmail: jobsTable.createdByEmail,
+      sourceFilenames: jobsTable.sourceFilenames,
+      createdAt: jobsTable.createdAt,
+      expiresAt: jobsTable.expiresAt,
+    })
+    .from(jobsTable)
+    .orderBy(dsql`${jobsTable.createdAt} DESC`)
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    plnt: r.plnt,
+    step: (r.step as JobStep) ?? "s1_uploaded",
+    createdByEmail: r.createdByEmail,
+    sourceFilenames: r.sourceFilenames,
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+  }));
+}
+
+// ============================================================================
 // 만료 정리 (cron)
 // ============================================================================
 export async function deleteExpiredJobs(

@@ -3,14 +3,22 @@
  * body: { email: string, code: string (6 digits) }
  *
  * - timing-safe HMAC 비교
- * - 검증 통과 시 세션 쿠키 세팅
- * - 검증 실패 시 enumeration 방지 통일 응답 (단, 401 status)
+ * - 검증 통과 시 회원 프로비저닝 + 세션 쿠키 + last_login 갱신
+ * - 성공/실패를 login_logs에 적재 (PRD #0003 F2)
+ * - enumeration 방지 통일 응답
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { isEmailAllowed, normalizeEmail } from "@/lib/auth/allowlist";
+import { normalizeEmail } from "@/lib/auth/allowlist";
 import { isOtpFormat, verifyOtpHash } from "@/lib/auth/otp";
+import {
+  checkLoginAllowed,
+  provisionLogin,
+  recordLogin,
+  touchLastLogin,
+  type LoginReason,
+} from "@/lib/auth/roles";
 import { setSessionCookie, signSession } from "@/lib/auth/session";
 import { verifyOtp } from "@/lib/auth/store";
 
@@ -20,6 +28,14 @@ const Body = z.object({
   email: z.string().email().max(200),
   code: z.string().length(6),
 });
+
+function ipOf(req: Request): string | null {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    null
+  );
+}
 
 export async function POST(req: Request) {
   let body: unknown;
@@ -34,10 +50,19 @@ export async function POST(req: Request) {
   }
   const email = normalizeEmail(parsed.data.email);
   const code = parsed.data.code.trim();
+  const ip = ipOf(req);
+  const ua = req.headers.get("user-agent");
+
+  const log = (success: boolean, reason: LoginReason) =>
+    recordLogin({ email, ip, userAgent: ua, success, reason }).catch(() => {});
+
   if (!isOtpFormat(code)) {
     return NextResponse.json({ error: "invalid_code" }, { status: 400 });
   }
-  if (!isEmailAllowed(email)) {
+
+  const allowed = await checkLoginAllowed(email);
+  if (!allowed.ok) {
+    await log(false, allowed.reason);
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 
@@ -45,6 +70,13 @@ export async function POST(req: Request) {
     verifyOtpHash(code, storedHash)
   );
   if (!res.ok) {
+    const reason: LoginReason =
+      res.reason === "too_many_attempts"
+        ? "too_many_attempts"
+        : res.reason === "expired"
+          ? "expired"
+          : "wrong_code";
+    await log(false, reason);
     return NextResponse.json(
       {
         error:
@@ -58,6 +90,10 @@ export async function POST(req: Request) {
     );
   }
 
+  // 성공 — 프로비저닝 + last_login + 세션
+  await provisionLogin(email);
+  await touchLastLogin(email);
+  await log(true, "success");
   const token = await signSession(email);
   await setSessionCookie(token);
   return NextResponse.json({ ok: true, email });

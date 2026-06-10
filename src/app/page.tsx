@@ -1,8 +1,12 @@
+import { AppHeader } from "@/components/app-header";
 import { StepOneUpload } from "@/components/step-one-upload";
+
+export const dynamic = "force-dynamic";
 
 export default function HomePage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 p-8">
+      <AppHeader />
       <header className="border-b border-[var(--color-border)] pb-6">
         <h1 className="text-2xl font-semibold tracking-tight">
           피킹지시서 자동 분류·출력
