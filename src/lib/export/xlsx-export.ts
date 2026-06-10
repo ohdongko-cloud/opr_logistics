@@ -27,49 +27,38 @@ function rawSheetToAoa(sheet: ParsedSheet): (string | number | boolean | null)[]
 
 interface ExportInput {
   job: JobRecord;
-  /** 원본 파싱 결과 — RAW 시트 4개 복원에 사용. M5 인메모리 store에서 같이 보관해야 함. */
-  rawSheets: {
-    stage1: ParsedSheet;
-    stage2: ParsedSheet | null;
-    stage3: ParsedSheet;
-    stage4: ParsedSheet;
-  };
 }
 
 export function buildIntegratedWorkbook(input: ExportInput): {
   buffer: ArrayBuffer;
   filename: string;
 } {
-  const { job, rawSheets } = input;
+  const { job } = input;
+  const stages = job.data.stages;
+  const out1 = job.data.output1?.output1 ?? [];
+  const outletName = job.data.output1?.outletName ?? "강서";
+  const o23 = job.data.outputs23;
   const wb = XLSX.utils.book_new();
 
-  // RAW 1~4 (M9: formula injection 방어 위해 sanitize)
-  XLSX.utils.book_append_sheet(
-    wb,
-    XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage1))),
-    "1단계(STO)"
-  );
-  if (rawSheets.stage2) {
+  // RAW 1~4 (M9: formula injection 방어 위해 sanitize, 누적 저장분만)
+  const rawList: Array<[ParsedSheet | null, string]> = [
+    [stages.stage1, "1단계(STO)"],
+    [stages.stage2, "2단계(물류분배)"],
+    [stages.stage3, "3단계(피킹지시서패션)"],
+    [stages.stage4, "4단계(EAN)"],
+  ];
+  for (const [sheet, name] of rawList) {
+    if (!sheet) continue;
     XLSX.utils.book_append_sheet(
       wb,
-      XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage2))),
-      "2단계(물류분배)"
+      XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(sheet))),
+      name
     );
   }
-  XLSX.utils.book_append_sheet(
-    wb,
-    XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage3))),
-    "3단계(피킹지시서패션)"
-  );
-  XLSX.utils.book_append_sheet(
-    wb,
-    XLSX.utils.aoa_to_sheet(sanitizeAoa(rawSheetToAoa(rawSheets.stage4))),
-    "4단계(EAN)"
-  );
 
   // 출력1. 관리용 문서
   const out1Header = ["구매그룹", "플랜트", "출고지", "수량", "납품번호", "PG번호", "브랜드"];
-  const out1Rows = job.processed.output1.map((r) => [
+  const out1Rows = out1.map((r) => [
     r.purchaseGroup,
     r.plnt,
     r.outletName,
@@ -99,7 +88,7 @@ export function buildIntegratedWorkbook(input: ExportInput): {
     "복종",
     "아이템",
   ];
-  const out2Rows = job.processed.output2.map((r) => [
+  const out2Rows = (o23?.output2 ?? []).map((r) => [
     r.brand,
     r.sourceBin,
     r.boxNo,
@@ -123,8 +112,8 @@ export function buildIntegratedWorkbook(input: ExportInput): {
 
   // 출력3. 파렛트
   const out3Header = ["브랜드", "소스빈"];
-  const out3HeaderLine = `${job.outletName}점_데일리 출고일 : ${formatDateDot(new Date())}`;
-  const out3Rows = job.processed.output3.map((r) => [r.brand, r.sourceBin]);
+  const out3HeaderLine = `${outletName}점_데일리 출고일 : ${formatDateDot(new Date())}`;
+  const out3Rows = (o23?.output3 ?? []).map((r) => [r.brand, r.sourceBin]);
   XLSX.utils.book_append_sheet(
     wb,
     XLSX.utils.aoa_to_sheet(
@@ -145,7 +134,7 @@ export function buildIntegratedWorkbook(input: ExportInput): {
     "첫글자",
     "분류",
   ];
-  const etcRows = job.processed.etc.map((r) => [
+  const etcRows = (o23?.etc ?? []).map((r) => [
     r.material,
     r.newBin,
     r.boxNo,
@@ -162,7 +151,7 @@ export function buildIntegratedWorkbook(input: ExportInput): {
     "ETC 리포트"
   );
 
-  const filename = `${job.outletName}점_데일리 작업지시서_${formatDateCompact(new Date())}.xlsx`;
+  const filename = `${outletName}점_데일리 작업지시서_${formatDateCompact(new Date())}.xlsx`;
   const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
   return { buffer: out as ArrayBuffer, filename };
 }

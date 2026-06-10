@@ -1,25 +1,24 @@
 /**
- * GET    /api/jobs/[id]  — 잡 조회 (요약)
- * PATCH  /api/jobs/[id]  — pgNumbers / headerOverrides 부분 업데이트
+ * GET   /api/jobs/[id]  — 잡 뷰(단계·복사데이터·진행) 조회
+ * PATCH /api/jobs/[id]  — 머리글/ETC 편집 (전이 아님)
  *
- * M5 인메모리 store. M6에서 Neon으로 교체.
+ * 단계 전이는 전용 라우트: /stage, /pg, /finalize
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { checkJobOwnership } from "@/lib/auth/ownership";
-import { getJob, updateJob } from "@/lib/job/store";
-import { detectPlantPgConflict, validatePgInputs } from "@/lib/pg";
+import { getJob, updateJobMeta } from "@/lib/job/store";
+import { toJobView } from "@/lib/job/view";
 
 export const runtime = "nodejs";
 
 const PatchSchema = z
   .object({
-    pgNumbers: z.record(z.string(), z.string()).optional(),
     headerOverrides: z
       .object({
         docTitle: z.string().max(200).optional(),
-        deliveryDate: z.string().max(20).optional(),
+        deliveryDate: z.string().max(40).optional(),
         footerLeft: z.string().max(200).optional(),
       })
       .strict()
@@ -36,22 +35,8 @@ export async function GET(
   const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const own = await checkJobOwnership(job);
-  // IDOR 차단 — 존재 여부 누출 방지를 위해 403 대신 404로 응답
   if (!own.ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  return NextResponse.json({
-    id: job.id,
-    plnt: job.plnt,
-    outletName: job.outletName,
-    sourceFilenames: job.sourceFilenames,
-    pgNumbers: job.pgNumbers,
-    headerOverrides: job.headerOverrides,
-    detectedPlants: job.processed.detectedPlants,
-    pageCount: job.processed.pages.length,
-    etcCount: job.processed.etc.length,
-    warningsCount: job.processed.warnings.length,
-    totals: job.processed.totals,
-    expiresAt: job.expiresAt.toISOString(),
-  });
+  return NextResponse.json({ view: toJobView(job) });
 }
 
 export async function PATCH(
@@ -72,50 +57,14 @@ export async function PATCH(
   }
   const parsed = PatchSchema.safeParse(body);
   if (!parsed.success) {
-    // 운영에선 detail 노출 금지 (내부 필드 누출 회피)
     const detail =
-      process.env.NODE_ENV === "production"
-        ? undefined
-        : parsed.error.flatten();
-    return NextResponse.json(
-      { error: "validation", detail },
-      { status: 400 }
-    );
+      process.env.NODE_ENV === "production" ? undefined : parsed.error.flatten();
+    return NextResponse.json({ error: "validation", detail }, { status: 400 });
   }
-
-  // PG 검증: 정규식 + 플랜트 일관성
-  if (parsed.data.pgNumbers) {
-    const formatIssues = validatePgInputs(
-      job.processed.detectedPlants,
-      parsed.data.pgNumbers
-    ).filter((i) => i.code !== "missing"); // 부분 업데이트라 missing은 허용
-    if (formatIssues.length > 0) {
-      return NextResponse.json(
-        { error: "pg_validation", issues: formatIssues },
-        { status: 400 }
-      );
-    }
-    const conflictIssues = detectPlantPgConflict(
-      job.pgNumbers,
-      parsed.data.pgNumbers
-    );
-    if (conflictIssues.length > 0) {
-      return NextResponse.json(
-        { error: "pg_conflict", issues: conflictIssues },
-        { status: 409 }
-      );
-    }
-  }
-
-  const updated = await updateJob(id, {
-    pgNumbers: parsed.data.pgNumbers,
+  const res = await updateJobMeta(id, {
     headerOverrides: parsed.data.headerOverrides,
     etcAcknowledged: parsed.data.etcAcknowledged,
   });
-
-  return NextResponse.json({
-    id: updated!.id,
-    pgNumbers: updated!.pgNumbers,
-    headerOverrides: updated!.headerOverrides,
-  });
+  if (!res.ok) return NextResponse.json({ error: res.error }, { status: 409 });
+  return NextResponse.json({ view: toJobView(res.job!) });
 }

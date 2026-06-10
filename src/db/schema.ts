@@ -42,8 +42,13 @@ export const jobs = pgTable(
       .notNull()
       .references(() => plants.plnt),
 
-    // 'uploaded' | 'parsed' | 'pg_pending' | 'ready' | 'archived'
+    // (레거시) 'uploaded' | 'parsed' | 'pg_pending' | 'ready' | 'archived'
+    // PRD #0002: step이 진실의 원천. status는 하위호환용으로만 잔존.
     status: text("status").notNull().default("uploaded"),
+
+    // PRD #0002 단계 상태머신: s1_uploaded|s2_uploaded|pg_entered|s3_uploaded|s4_uploaded|ready
+    // 기존 잡(레거시)은 default 's1_uploaded' (하위호환)
+    step: text("step").notNull().default("s1_uploaded"),
 
     sourceFilenames: text("source_filenames")
       .array()

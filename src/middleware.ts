@@ -13,7 +13,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, verifySession } from "@/lib/auth/session";
 
 const PROTECTED_PAGE_PREFIXES = ["/jobs"];
-const PROTECTED_API_PREFIXES = ["/api/jobs", "/api/upload"];
+// /api/jobs 는 생성·단계업로드·PG·다운로드 모두 포함 (하위 경로 전부 보호)
+const PROTECTED_API_PREFIXES = ["/api/jobs"];
 
 function isProtected(pathname: string): { kind: "page" | "api" | null } {
   // 메인 페이지(/) 도 보호 — 미인증 사용자가 업로드 UI를 보고 "로그인 안내가 없네?" 라고
@@ -58,6 +59,6 @@ export const config = {
     "/",
     "/jobs/:path*",
     "/api/jobs/:path*",
-    "/api/upload",
+    "/api/jobs",
   ],
 };

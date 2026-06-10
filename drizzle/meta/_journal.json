@@ -15,6 +15,13 @@
       "when": 1781044985457,
       "tag": "0001_sleepy_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781099016918,
+      "tag": "0002_salty_mariko_yashida",
+      "breakpoints": true
     }
   ]
 }

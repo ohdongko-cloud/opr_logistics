@@ -28,10 +28,7 @@ export async function GET(
   const own = await checkJobOwnership(job);
   if (!own.ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const { buffer, filename } = buildIntegratedWorkbook({
-    job,
-    rawSheets: job.rawSheets,
-  });
+  const { buffer, filename } = buildIntegratedWorkbook({ job });
 
   // 파일명에 한글 → RFC 5987 인코딩
   const encoded = encodeURIComponent(filename);
