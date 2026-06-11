@@ -157,6 +157,9 @@ export const users = pgTable(
     role: text("role").notNull().default("user"), // master|admin|user
     status: text("status").notNull().default("active"), // active|withdrawn
     invitedBy: text("invited_by"),
+    // 비밀번호 로그인 (PRD #0004) — scrypt 인코딩 'scrypt$N$r$p$saltB64$hashB64'. NULL=미설정.
+    passwordHash: text("password_hash"),
+    passwordSetAt: timestamp("password_set_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -177,6 +180,7 @@ export const loginLogs = pgTable(
     userAgent: text("user_agent"),
     success: boolean("success").notNull(),
     // success|wrong_code|expired|too_many_attempts|not_allowed|withdrawn
+    // |wrong_password|no_password|password_set  (PRD #0004)
     reason: text("reason"),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },

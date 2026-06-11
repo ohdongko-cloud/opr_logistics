@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { AdminDashboard } from "@/components/admin/admin-dashboard";
 import { AppHeader } from "@/components/app-header";
+import { enforcePasswordSet } from "@/lib/auth/page-guard";
 import { getRole, masterEmail } from "@/lib/auth/roles";
 import { getCurrentEmail } from "@/lib/auth/session";
 
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminPage() {
   const email = await getCurrentEmail();
   if (!email) redirect("/login");
+  await enforcePasswordSet(email); // 비번 미설정 → /set-password (PRD #0004 F6)
   const role = await getRole(email);
   if (role !== "admin" && role !== "master") redirect("/");
 

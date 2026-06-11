@@ -57,6 +57,12 @@ export function clientIp(req: Request): string {
 export const UPLOAD_LIMIT = { limit: 5, windowSeconds: 60 };
 export const EDIT_LIMIT = { limit: 30, windowSeconds: 60 };
 
+/** 비밀번호 로그인 브루트포스 완화 (PRD #0004 F3.1) */
+export const LOGIN_IP_LIMIT = { limit: 10, windowSeconds: 60 }; // IP당 분당 10회
+export const LOGIN_EMAIL_LIMIT = { limit: 5, windowSeconds: 15 * 60 }; // 이메일당 15분 5회
+/** 비밀번호 설정 (F5.4) */
+export const SETPW_LIMIT = { limit: 10, windowSeconds: 60 };
+
 /** 테스트용 */
 export function clearRateLimits(): void {
   buckets.clear();

@@ -1,9 +1,13 @@
 import { AppHeader } from "@/components/app-header";
 import { HomeFlow } from "@/components/home-flow";
+import { enforcePasswordSet } from "@/lib/auth/page-guard";
+import { getCurrentEmail } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
+export default async function HomePage() {
+  // 로그인했으나 비밀번호 미설정이면 /set-password로 강제 (PRD #0004 F6)
+  await enforcePasswordSet(await getCurrentEmail());
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 p-8">
       <AppHeader />

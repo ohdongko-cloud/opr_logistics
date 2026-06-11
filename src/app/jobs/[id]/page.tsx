@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 
 import { JobFlow, type JobView } from "@/components/job-flow";
 import { checkJobOwnership } from "@/lib/auth/ownership";
+import { enforcePasswordSet } from "@/lib/auth/page-guard";
+import { getCurrentEmail } from "@/lib/auth/session";
 import { getJob } from "@/lib/job/store";
 import { toJobView } from "@/lib/job/view";
 
@@ -15,6 +17,8 @@ export default async function JobPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // 비번 미설정 → /set-password (PRD #0004 F6)
+  await enforcePasswordSet(await getCurrentEmail());
   const { id } = await params;
   const job = await getJob(id);
   if (!job) notFound();

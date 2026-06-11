@@ -14,6 +14,7 @@ import { normalizeEmail } from "@/lib/auth/allowlist";
 import { isOtpFormat, verifyOtpHash } from "@/lib/auth/otp";
 import {
   checkLoginAllowed,
+  hasPassword,
   provisionLogin,
   recordLogin,
   touchLastLogin,
@@ -96,5 +97,7 @@ export async function POST(req: Request) {
   await log(true, "success");
   const token = await signSession(email);
   await setSessionCookie(token);
-  return NextResponse.json({ ok: true, email });
+  // 비밀번호 미설정이면 클라이언트가 /set-password로 유도 (PRD #0004 F4.1/F6.3)
+  const needsPasswordSetup = !(await hasPassword(email));
+  return NextResponse.json({ ok: true, email, needsPasswordSetup });
 }

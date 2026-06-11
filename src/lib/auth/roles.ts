@@ -23,7 +23,10 @@ export type LoginReason =
   | "expired"
   | "too_many_attempts"
   | "not_allowed"
-  | "withdrawn";
+  | "withdrawn"
+  | "wrong_password" // 비밀번호 로그인 실패 (PRD #0004)
+  | "no_password" // 비밀번호 미설정 상태에서 비번 로그인 시도
+  | "password_set"; // 비밀번호 설정/재설정 완료
 
 /** env master 이메일 (정규화). 미설정이면 null. */
 export function masterEmail(): string | null {
@@ -48,6 +51,8 @@ interface MemUser {
   invitedBy: string | null;
   createdAt: Date;
   lastLoginAt: Date | null;
+  passwordHash?: string | null;
+  passwordSetAt?: Date | null;
 }
 const UKEY = Symbol.for("opr-logistics.users.v1");
 const LKEY = Symbol.for("opr-logistics.loginlogs.v1");
@@ -85,7 +90,17 @@ async function findUser(email: string): Promise<UserRecord | null> {
   const key = normalizeEmail(email);
   if (!USE_DB) {
     const u = memUsers.get(key);
-    return u ? { ...u } : null;
+    // 명시 필드만 — passwordHash 가 UserRecord(관리 API)로 새지 않게.
+    return u
+      ? {
+          email: u.email,
+          role: u.role,
+          status: u.status,
+          invitedBy: u.invitedBy,
+          createdAt: u.createdAt,
+          lastLoginAt: u.lastLoginAt,
+        }
+      : null;
   }
   const rows = await db.select().from(users).where(eq(users.email, key)).limit(1);
   const r = rows[0];
@@ -136,6 +151,9 @@ async function upsertUser(rec: {
       invitedBy: rec.invitedBy ?? existing?.invitedBy ?? null,
       createdAt: existing?.createdAt ?? new Date(),
       lastLoginAt: existing?.lastLoginAt ?? null,
+      // 비밀번호는 재프로비저닝(OTP 재인증 등)에서 보존 — 절대 덮어쓰지 않는다.
+      passwordHash: existing?.passwordHash ?? null,
+      passwordSetAt: existing?.passwordSetAt ?? null,
     });
     return;
   }
@@ -203,6 +221,65 @@ export async function touchLastLogin(email: string): Promise<void> {
 }
 
 // ============================================================================
+// 비밀번호 (PRD #0004) — 해시는 UserRecord/listUsers로 새지 않게 분리 조회
+// ============================================================================
+/** 비밀번호 해시(인코딩 문자열) 조회. 미설정/미존재 → null. 로그인 검증 전용. */
+export async function getPasswordHash(email: string): Promise<string | null> {
+  const key = normalizeEmail(email);
+  if (!USE_DB) return memUsers.get(key)?.passwordHash ?? null;
+  const rows = await db
+    .select({ h: users.passwordHash })
+    .from(users)
+    .where(eq(users.email, key))
+    .limit(1);
+  return rows[0]?.h ?? null;
+}
+
+/** 비밀번호 설정 여부 (전환 강제 가드 F6에 사용) */
+export async function hasPassword(email: string): Promise<boolean> {
+  return (await getPasswordHash(email)) !== null;
+}
+
+/**
+ * 비밀번호 설정/재설정. 행이 없으면 생성(upsert) — 직전 OTP 검증이 본인 증명.
+ * 평문이 아니라 이미 해싱된 인코딩 문자열을 받는다.
+ */
+export async function setPassword(
+  email: string,
+  encodedHash: string
+): Promise<void> {
+  const key = normalizeEmail(email);
+  const now = new Date();
+  if (!USE_DB) {
+    const existing = memUsers.get(key);
+    memUsers.set(key, {
+      email: key,
+      role: existing?.role ?? (isMasterEmail(key) ? "master" : "user"),
+      status: existing?.status ?? "active",
+      invitedBy: existing?.invitedBy ?? null,
+      createdAt: existing?.createdAt ?? now,
+      lastLoginAt: existing?.lastLoginAt ?? null,
+      passwordHash: encodedHash,
+      passwordSetAt: now,
+    });
+    return;
+  }
+  await db
+    .insert(users)
+    .values({
+      email: key,
+      role: isMasterEmail(key) ? "master" : "user",
+      status: "active",
+      passwordHash: encodedHash,
+      passwordSetAt: now,
+    })
+    .onConflictDoUpdate({
+      target: users.email,
+      set: { passwordHash: encodedHash, passwordSetAt: now },
+    });
+}
+
+// ============================================================================
 // 접속 로그
 // ============================================================================
 export async function recordLogin(input: {
@@ -238,10 +315,28 @@ export async function recordLogin(input: {
 // 관리 — 회원 목록/추가/수정 (PRD §10.3·10.4)
 // ============================================================================
 export async function listUsers(): Promise<UserRecord[]> {
+  // 명시 필드만 — password_hash/password_set_at 는 절대 반환에 포함하지 않는다(PRD #0004 S? / 관리 API 누출 방지).
   if (!USE_DB) {
-    return Array.from(memUsers.values()).map((u) => ({ ...u }));
+    return Array.from(memUsers.values()).map((u) => ({
+      email: u.email,
+      role: u.role,
+      status: u.status,
+      invitedBy: u.invitedBy,
+      createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt,
+    }));
   }
-  const rows = await db.select().from(users).orderBy(users.createdAt);
+  const rows = await db
+    .select({
+      email: users.email,
+      role: users.role,
+      status: users.status,
+      invitedBy: users.invitedBy,
+      createdAt: users.createdAt,
+      lastLoginAt: users.lastLoginAt,
+    })
+    .from(users)
+    .orderBy(users.createdAt);
   return rows.map((r) => ({
     email: r.email,
     role: (r.role as Role) ?? "user",
@@ -311,7 +406,17 @@ export async function patchUser(input: {
     const u = memUsers.get(target)!;
     if (input.role) u.role = input.role;
     if (input.status) u.status = input.status;
-    return { ok: true, user: { ...u } };
+    return {
+      ok: true,
+      user: {
+        email: u.email,
+        role: u.role,
+        status: u.status,
+        invitedBy: u.invitedBy,
+        createdAt: u.createdAt,
+        lastLoginAt: u.lastLoginAt,
+      },
+    };
   }
 
   const set: Record<string, unknown> = {};

@@ -12,7 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { SESSION_COOKIE_NAME, verifySession } from "@/lib/auth/session";
 
-const PROTECTED_PAGE_PREFIXES = ["/jobs", "/admin"];
+const PROTECTED_PAGE_PREFIXES = ["/jobs", "/admin", "/set-password"];
 // /api/jobs, /api/admin(역할 라우트) 하위 전부 보호. 단 CRON_SECRET 자체검증 디버그 라우트는 예외.
 const PROTECTED_API_PREFIXES = ["/api/jobs", "/api/admin"];
 // 세션 미보유 curl로 호출하는 디버그 라우트 — 미들웨어 인증 면제(핸들러가 CRON_SECRET 검사)
@@ -67,6 +67,7 @@ export const config = {
     "/jobs/:path*",
     "/admin/:path*",
     "/admin",
+    "/set-password",
     "/api/jobs/:path*",
     "/api/jobs",
     "/api/admin/:path*",

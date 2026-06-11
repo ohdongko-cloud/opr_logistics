@@ -3,11 +3,14 @@ import {
   addUser,
   checkLoginAllowed,
   clearRolesStore,
+  getPasswordHash,
   getRole,
+  hasPassword,
   isMasterEmail,
   masterEmail,
   patchUser,
   provisionLogin,
+  setPassword,
 } from "./roles";
 
 const ORIG_MASTER = process.env.MASTER_ADMIN_EMAIL;
@@ -179,5 +182,30 @@ describe("addUser", () => {
   it("잘못된 이메일 거부", async () => {
     const r = await addUser("not-an-email", "boss@eland.co.kr");
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("비밀번호 (PRD #0004)", () => {
+  it("미설정이면 hasPassword=false, getPasswordHash=null", async () => {
+    await provisionLogin("p1@eland.co.kr");
+    expect(await hasPassword("p1@eland.co.kr")).toBe(false);
+    expect(await getPasswordHash("p1@eland.co.kr")).toBeNull();
+  });
+
+  it("setPassword 후 hasPassword=true, 해시 보존(정규화)", async () => {
+    await setPassword("P2@Eland.co.kr", "scrypt$16384$8$1$AA$BB");
+    expect(await hasPassword("p2@eland.co.kr")).toBe(true);
+    expect(await getPasswordHash("P2@ELAND.co.kr")).toBe("scrypt$16384$8$1$AA$BB");
+  });
+
+  it("재프로비저닝(OTP 재인증)이 비밀번호를 덮어쓰지 않음", async () => {
+    await setPassword("p3@eland.co.kr", "scrypt$16384$8$1$CC$DD");
+    await provisionLogin("p3@eland.co.kr"); // 비번 보존돼야 함
+    expect(await getPasswordHash("p3@eland.co.kr")).toBe("scrypt$16384$8$1$CC$DD");
+  });
+
+  it("setPassword는 행이 없어도 생성(upsert)", async () => {
+    await setPassword("p4@eland.co.kr", "scrypt$16384$8$1$EE$FF");
+    expect(await hasPassword("p4@eland.co.kr")).toBe(true);
   });
 });
