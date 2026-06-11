@@ -4,6 +4,7 @@
  */
 import { NextResponse } from "next/server";
 
+import { getRole } from "@/lib/auth/roles";
 import { getCurrentEmail } from "@/lib/auth/session";
 import { createJobAtStep1 } from "@/lib/job/store";
 import { toJobView } from "@/lib/job/view";
@@ -58,8 +59,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ jobId: job.id, view: toJobView(job) });
   } catch (err) {
     // 잡 생성 실패(blob 쓰기/DB insert/스키마 불일치 등)를 불투명한 500으로 두지 않는다.
-    // 상세는 서버 로그(Vercel Functions)로만, 사용자에겐 안정적 코드만 노출(내부정보 누출 방지).
+    // 상세는 서버 로그(Vercel Functions)에 남기고, 사용자에겐 안정적 코드만.
+    // 단 master 운영자에게는 원인 메시지(detail)를 함께 반환해 현장 디버깅을 돕는다(일반/익명 사용자 비노출).
     console.error("[POST /api/jobs] job create failed:", err);
-    return NextResponse.json({ error: "job_create_failed" }, { status: 500 });
+    let detail: string | undefined;
+    try {
+      if (email && (await getRole(email)) === "master") {
+        detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      }
+    } catch {
+      /* 역할 조회 실패는 무시 — 진단 부가정보일 뿐 */
+    }
+    return NextResponse.json({ error: "job_create_failed", detail }, { status: 500 });
   }
 }

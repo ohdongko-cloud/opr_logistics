@@ -28,7 +28,8 @@ export function StepOneUpload({
       const res = await fetch("/api/jobs", { method: "POST", body: fd });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(`업로드 실패: ${body.error ?? res.statusText}`);
+        const detail = body.detail ? ` — ${body.detail}` : "";
+        toast.error(`업로드 실패: ${body.error ?? res.statusText}${detail}`);
         return;
       }
       toast.success("1단계 업로드 완료");
