@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
 import { StageUpload } from "@/components/stage-upload";
+import { StepOneUpload } from "@/components/step-one-upload";
 
 interface CopyColumn {
   key: string;
@@ -49,29 +50,31 @@ export interface JobView {
   copy: CopyColumn[];
 }
 
+// 진행바: ① STO 업로드(=화면0)를 맨 앞에 두고, 이후 단계는 +1 (PRD #0002 F14)
 const STEPS = [
-  "① 1단계 결과",
-  "② 2단계(선택)",
-  "③ PG 입력",
-  "④ 출력1",
-  "⑤ 3단계 업로드",
-  "⑥ 4단계 업로드",
-  "⑦ 최종",
+  "① STO 업로드",
+  "② 1단계 결과",
+  "③ 2단계(선택)",
+  "④ PG 입력",
+  "⑤ 출력1",
+  "⑥ 3단계 업로드",
+  "⑦ 4단계 업로드",
+  "⑧ 최종",
 ];
 
-/** 현재 step에서 이동 가능한 가장 먼 화면 인덱스 (부록 F) */
+/** 현재 step에서 이동 가능한 가장 먼 화면 인덱스 (부록 F/F14). 0(STO 업로드)은 항상 도달. */
 function furthestScreen(step: JobView["step"]): number {
   switch (step) {
     case "s1_uploaded":
     case "s2_uploaded":
-      return 3; // 출력1 미리보기까지 열람 가능
+      return 4; // 출력1 미리보기까지 열람 가능
     case "pg_entered":
-      return 4; // 3단계 업로드
+      return 5; // 3단계 업로드
     case "s3_uploaded":
-      return 5; // 4단계 업로드
+      return 6; // 4단계 업로드
     case "s4_uploaded":
     case "ready":
-      return 6;
+      return 7;
     default:
       return 0;
   }
@@ -81,37 +84,81 @@ function furthestScreen(step: JobView["step"]): number {
 function currentScreen(step: JobView["step"]): number {
   switch (step) {
     case "s1_uploaded":
-      return 0; // 1단계 결과 — 분배번호·자재 복사
+      return 1; // 1단계 결과 — 분배번호·자재 복사
     case "s2_uploaded":
-      return 2; // PG 입력
+      return 3; // PG 입력
     case "pg_entered":
-      return 3; // 출력1 + PG번호 복사
+      return 4; // 출력1 + PG번호 복사
     case "s3_uploaded":
-      return 4; // 자재코드 복사 + 4단계 업로드
+      return 5; // 자재코드 복사 + 3단계 업로드
     case "s4_uploaded":
     case "ready":
-      return 6; // 최종
+      return 7; // 최종
     default:
       return 0;
   }
 }
 
-export function JobFlow({ initialView }: { initialView: JobView }) {
+export function JobFlow({
+  initialView,
+  homeMode = false,
+}: {
+  initialView: JobView | null;
+  homeMode?: boolean;
+}) {
   const router = useRouter();
-  const [view, setView] = useState<JobView>(initialView);
-  const furthest = furthestScreen(view.step);
-  const [viewIdx, setViewIdx] = useState<number>(currentScreen(initialView.step));
+  const [view, setView] = useState<JobView | null>(initialView);
+  const furthest = view ? furthestScreen(view.step) : 0;
+  const [viewIdx, setViewIdx] = useState<number>(
+    view ? currentScreen(view.step) : 0
+  );
 
   const refresh = (v: unknown) => {
     const nv = v as JobView;
     setView(nv);
-    // 전이 후 "지금 할 일" 화면으로 이동
+    // 전이 후(업로드 포함) "지금 할 일" 화면으로 이동
     setViewIdx(currentScreen(nv.step));
   };
   const goto = (i: number) => setViewIdx(Math.max(0, Math.min(furthest, i)));
+  const resetToUpload = () => {
+    if (homeMode) {
+      setView(null);
+      setViewIdx(0);
+    } else {
+      router.push("/"); // /jobs/[id] 등에서는 홈(업로드)로
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
+      {view && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-3">
+          <p className="text-xs text-[var(--color-muted)]">
+            잡{" "}
+            <span className="font-medium text-slate-700">
+              #{view.id.slice(0, 8)}
+            </span>{" "}
+            · 플랜트 {view.plnt} · 출고지 {view.outletName} · 만료{" "}
+            {view.expiresAt.slice(0, 10)}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                confirm(
+                  "현재 작업을 닫고 새 STO 업로드로 돌아갈까요? (진행 중 잡은 서버에 보존됩니다)"
+                )
+              ) {
+                resetToUpload();
+              }
+            }}
+            className="rounded-md border border-[var(--color-border)] bg-white px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+          >
+            + 새 작업
+          </button>
+        </div>
+      )}
+
       <Progress current={viewIdx} furthest={furthest} onJump={goto} />
 
       {/* 좌우 이동 */}
@@ -139,48 +186,77 @@ export function JobFlow({ initialView }: { initialView: JobView }) {
 
       <Screen view={view} idx={viewIdx} onDone={refresh} />
 
-      {/* 이전 단계 수정 — 앞 RAW 재업로드 (무효화 강등, 확인 모달) */}
-      {view.step !== "s1_uploaded" && view.step !== "s2_uploaded" && (
-        <details className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-4">
-          <summary className="cursor-pointer text-sm font-medium">
-            이전 단계 다시 업로드 (수정)
-          </summary>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <StageUpload
-              endpoint={`/api/jobs/${view.id}/stage?n=1`}
-              label="1단계 재업로드 (전체 초기화)"
-              hint="PG·출력1·2·3와 2~4단계가 모두 폐기되고 STEP1로 돌아갑니다."
-              confirmMessage="1단계를 다시 올리면 입력한 PG번호와 생성된 출력1·2·3, 이후 단계 업로드가 모두 삭제됩니다. 계속할까요?"
-              onDone={refresh}
-            />
-            {(view.step === "s3_uploaded" ||
-              view.step === "s4_uploaded" ||
-              view.step === "ready") && (
+      {/* 3단계 재업로드 (1단계 재업로드는 화면 ①STO로 통합) */}
+      {view &&
+        (view.step === "s3_uploaded" ||
+          view.step === "s4_uploaded" ||
+          view.step === "ready") && (
+          <details className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+            <summary className="cursor-pointer text-sm font-medium">
+              3단계 다시 업로드 (수정)
+            </summary>
+            <div className="mt-3">
               <StageUpload
                 endpoint={`/api/jobs/${view.id}/stage?n=3`}
                 label="3단계 재업로드"
-                hint="출력2·3와 4단계가 폐기되고 STEP5로 돌아갑니다."
+                hint="출력2·3와 4단계가 폐기되고 3단계 업로드로 돌아갑니다."
                 confirmMessage="3단계를 다시 올리면 출력2·3와 4단계 업로드가 삭제됩니다. 계속할까요?"
                 onDone={refresh}
               />
-            )}
-          </div>
-        </details>
-      )}
+            </div>
+          </details>
+        )}
 
-      <button
-        type="button"
-        onClick={() => router.refresh()}
-        className="self-start text-xs text-[var(--color-muted)] underline"
-      >
-        새로고침
-      </button>
+      {view && (
+        <button
+          type="button"
+          onClick={() => router.refresh()}
+          className="self-start text-xs text-[var(--color-muted)] underline"
+        >
+          새로고침
+        </button>
+      )}
     </div>
   );
 }
 
-/** idx 화면 1개를 렌더 (부록 F — 도달 단계 자유 열람) */
+/**
+ * 화면 라우팅 (PRD #0002 F14): idx 0 = STO 업로드/재업로드, idx 1~7 = 기존 단계(StageScreen idx-1).
+ */
 function Screen({
+  view,
+  idx,
+  onDone,
+}: {
+  view: JobView | null;
+  idx: number;
+  onDone: (v: unknown) => void;
+}) {
+  if (idx === 0) {
+    if (!view) {
+      // 잡 생성 전 — STO(1단계) 업로드. 성공 시 잡 생성 → onDone(view)로 ②로 착지.
+      // StepOneUpload가 자체 제목·설명·드롭존 카드를 렌더하므로 Section 래퍼 없이.
+      return <StepOneUpload onCreated={onDone} />;
+    }
+    // 잡 존재 — STO 재업로드(전체 초기화)
+    return (
+      <Section title="STO(1단계) 재업로드 — 전체 초기화">
+        <StageUpload
+          endpoint={`/api/jobs/${view.id}/stage?n=1`}
+          label="1단계 재업로드 (전체 초기화)"
+          hint="PG·출력1·2·3와 2~4단계가 모두 폐기되고 ② 1단계 결과로 돌아갑니다."
+          confirmMessage="1단계를 다시 올리면 입력한 PG번호와 생성된 출력1·2·3, 이후 단계 업로드가 모두 삭제됩니다. 계속할까요?"
+          onDone={onDone}
+        />
+      </Section>
+    );
+  }
+  if (!view) return null;
+  return <StageScreen view={view} idx={idx - 1} onDone={onDone} />;
+}
+
+/** 기존 단계 화면(0=1단계결과 … 6=최종) — view 보장 */
+function StageScreen({
   view,
   idx,
   onDone,

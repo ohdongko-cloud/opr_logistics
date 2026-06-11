@@ -29,15 +29,7 @@ export default async function JobPage({
 
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 p-8">
-      <header className="flex items-baseline justify-between border-b border-[var(--color-border)] pb-4">
-        <div>
-          <h1 className="text-xl font-semibold">잡 #{job.id.slice(0, 8)}</h1>
-          <p className="text-xs text-[var(--color-muted)]">
-            플랜트 {view.plnt} · 출고지 {view.outletName} · 만료{" "}
-            {view.expiresAt.slice(0, 10)}
-          </p>
-        </div>
-      </header>
+      {/* 잡 요약 헤더는 JobFlow가 자체 렌더 (PRD #0002 F14.4) */}
       <JobFlow initialView={view} />
     </main>
   );
