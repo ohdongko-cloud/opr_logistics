@@ -4,9 +4,19 @@
  * BLOB_READ_WRITE_TOKEN 환경변수가 있으면 Blob 사용, 없으면 인메모리 폴백.
  * 인메모리 폴백은 개발/테스트용 — 프로세스 재시작 시 휘발.
  */
-import { del as blobDel, head as blobHead, put as blobPut } from "@vercel/blob";
+import { del as blobDel, get as blobGet, put as blobPut } from "@vercel/blob";
 
 const USE_BLOB = !!process.env.BLOB_READ_WRITE_TOKEN;
+
+/**
+ * Blob 스토어 접근모드 — 스토어 설정과 반드시 일치해야 한다.
+ *   - 'private'(기본): 잡 데이터는 서버 전용(클라이언트에 URL 미노출)이라 private 스토어 권장.
+ *     읽기는 토큰 인증 get()으로 수행.
+ *   - 'public': 공개 스토어를 쓰는 경우 BLOB_ACCESS=public 으로 override.
+ * (private 스토어에 access:'public'으로 put하면 "Cannot use public access on a private store" 예외 발생)
+ */
+const BLOB_ACCESS: "public" | "private" =
+  process.env.BLOB_ACCESS === "public" ? "public" : "private";
 
 /** 폴백 인메모리 store — globalThis 싱글톤으로 HMR 안전 */
 const MEM_KEY = Symbol.for("opr-logistics.blob.memory.v1");
@@ -41,7 +51,7 @@ export async function putBlob(
           : Buffer.from(body);
     // overwrite=true: 고정 경로 덮어쓰기 (잡 데이터처럼 매번 갱신되는 객체 — 고아 blob 방지)
     const res = await blobPut(pathname, sdkBody, {
-      access: "public",
+      access: BLOB_ACCESS,
       contentType: opts.contentType,
       addRandomSuffix: !opts.overwrite,
       allowOverwrite: !!opts.overwrite,
@@ -64,13 +74,12 @@ export async function getBlobAsArrayBuffer(
   key: string
 ): Promise<ArrayBuffer | null> {
   if (USE_BLOB) {
-    // key는 Blob put 결과 URL
+    // key는 Blob put 결과 URL. private 스토어는 공개 fetch가 불가하므로
+    // 토큰 인증 get()으로 본문 스트림을 받아 ArrayBuffer로 변환.
     try {
-      const meta = await blobHead(key);
-      if (!meta) return null;
-      const res = await fetch(meta.url);
-      if (!res.ok) return null;
-      return await res.arrayBuffer();
+      const result = await blobGet(key, { access: BLOB_ACCESS, useCache: false });
+      if (!result || result.statusCode !== 200 || !result.stream) return null;
+      return await new Response(result.stream).arrayBuffer();
     } catch {
       return null;
     }

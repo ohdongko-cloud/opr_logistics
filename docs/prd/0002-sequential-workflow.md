@@ -262,3 +262,9 @@ F11의 단계 네비게이션을 **홈(`/`) 화면 그 자리에서** 쓰도록 
 - **F13.2 FK 자가복구**: `jobs.plnt → plants.plnt` FK 때문에 plants에 해당 plnt 행이 없으면 insert가 실패한다. 잡 생성 시 plants 행을 `onConflictDoNothing`으로 먼저 보장(부트스트랩 시드 누락/신규 플랜트 대비).
 - **F13.3 진단 라우트**: `GET /api/admin/db-introspect`(Bearer CRON_SECRET)가 `jobs` 컬럼 목록과 누락 컬럼(특히 `step`, 마이그레이션 0002)을 함께 반환한다.
 - **운영 전제**: 모든 마이그레이션(0000~0003) 적용 필요. `step` 컬럼(0002) 또는 plants 시드(0000)가 누락된 운영 DB는 `npm run db:migrate`로 멱등 적용.
+
+### F13.4 — 확정 원인: Blob 스토어 접근모드 불일치 (★해결)
+서버 로그(master-only detail)로 확정: `Vercel Blob: Cannot use public access on a private store.` 운영 Blob 스토어가 **private**인데 `putBlob`가 `access:'public'`으로 업로드해 예외 → 잡 생성 500. (파서·DB·스키마는 모두 정상이었고, 마지막 관문이 Blob 접근모드였다.)
+- **수정**: `BLOB_ACCESS` 환경변수(기본 `private`)로 put/read 접근모드를 스토어와 일치시킨다. 잡 데이터는 클라이언트에 URL을 노출하지 않는 서버 전용이므로 private이 보안상 더 적합.
+- **읽기 경로**: private 블롭은 공개 fetch 불가 → `@vercel/blob`의 토큰 인증 `get(key,{access:'private',useCache:false})` 스트림을 `new Response(stream).arrayBuffer()`로 변환.
+- **공개 스토어**를 쓰는 배포는 `BLOB_ACCESS=public`으로 override.
