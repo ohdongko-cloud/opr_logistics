@@ -25,22 +25,11 @@ export interface ParsedSheet {
 export interface ParsedWorkbook {
   /** 무시되지 않은 시트들 */
   sheets: ParsedSheet[];
-  /** 무시된 시트들 (티코드 등) */
+  /** 무시된 시트들 (헤더 행이 없어 데이터로 볼 수 없는 시트) */
   ignored: string[];
 }
 
 const MAX_ROWS_PER_SHEET = 50_000;
-/** 무시할 시트명 패턴 — PRD F1.4 */
-const IGNORED_SHEET_PATTERNS: RegExp[] = [
-  /^티코드$/,
-  /^sheet\d*$/i,
-  /^[\s\-_]*$/, // 빈 이름/구분자만
-];
-
-function isIgnoredSheet(name: string): boolean {
-  const trimmed = name.trim();
-  return IGNORED_SHEET_PATTERNS.some((re) => re.test(trimmed));
-}
 
 export interface ParseOptions {
   /** 시트당 최대 행수 (기본 50,000) — 초과 시 throw */
@@ -77,11 +66,11 @@ export function parseWorkbook(
   const sheets: ParsedSheet[] = [];
   const ignored: string[] = [];
 
+  // 단계 판별은 시트명이 아니라 컬럼(헤더)으로만 한다 (PRD #0002 F0.1).
+  // 모든 시트를 파싱하고, 헤더 행이 없는(데이터 아님) 시트만 ignored 처리.
+  // 컬럼이 어떤 단계와도 매칭되지 않는 시트(예: 티코드 참조탭)는 detection.stage=null →
+  // pickStageFromWorkbook에서 자연히 선택되지 않는다.
   for (const sheetName of wb.SheetNames) {
-    if (isIgnoredSheet(sheetName)) {
-      ignored.push(sheetName);
-      continue;
-    }
     const ws = wb.Sheets[sheetName];
     if (!ws) continue;
 
