@@ -13,7 +13,7 @@ import { eq, lte, sql as dsql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { db } from "@/db";
-import { jobs as jobsTable } from "@/db/schema";
+import { jobs as jobsTable, plants as plantsTable } from "@/db/schema";
 import { deleteBlob, getBlobAsJson, putBlob } from "@/lib/blob/storage";
 import {
   processOutput1,
@@ -152,6 +152,12 @@ export async function createJobAtStep1(
       contentType: "application/json",
       overwrite: true, // 고정 경로 — 고아 blob 방지
     });
+    // FK 안전장치: jobs.plnt → plants.plnt FK가 있으므로, plants에 해당 plnt가
+    // 없으면(부트스트랩 시드 누락/신규 플랜트) 먼저 등록한다. 있으면 무시.
+    await db
+      .insert(plantsTable)
+      .values({ plnt: input.plnt, outletName: outletFor(input.plnt) })
+      .onConflictDoNothing();
     await db.insert(jobsTable).values({
       id,
       plnt: input.plnt,

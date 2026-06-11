@@ -48,11 +48,18 @@ export async function POST(req: Request) {
   }
 
   const email = await getCurrentEmail();
-  const job = await createJobAtStep1({
-    stage1: parsed.sheet,
-    sourceFilename: parsed.filename,
-    plnt,
-    createdByEmail: email,
-  });
-  return NextResponse.json({ jobId: job.id, view: toJobView(job) });
+  try {
+    const job = await createJobAtStep1({
+      stage1: parsed.sheet,
+      sourceFilename: parsed.filename,
+      plnt,
+      createdByEmail: email,
+    });
+    return NextResponse.json({ jobId: job.id, view: toJobView(job) });
+  } catch (err) {
+    // 잡 생성 실패(blob 쓰기/DB insert/스키마 불일치 등)를 불투명한 500으로 두지 않는다.
+    // 상세는 서버 로그(Vercel Functions)로만, 사용자에겐 안정적 코드만 노출(내부정보 누출 방지).
+    console.error("[POST /api/jobs] job create failed:", err);
+    return NextResponse.json({ error: "job_create_failed" }, { status: 500 });
+  }
 }

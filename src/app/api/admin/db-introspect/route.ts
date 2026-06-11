@@ -52,15 +52,42 @@ export async function GET(req: Request) {
     );
     const missing = EXPECTED.filter((t) => !present.includes(t));
 
+    // jobs 컬럼 점검 — 업로드 500의 유력 원인(step 컬럼 미적용/마이그레이션 0002 누락) 진단용
+    const colRows = await db.execute(
+      sql`SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'jobs' ORDER BY column_name`
+    );
+    const colList =
+      (colRows as unknown as { rows?: { column_name: string }[] }).rows ??
+      (colRows as unknown as { column_name: string }[]);
+    const jobsColumns = (Array.isArray(colList) ? colList : []).map(
+      (r) => r.column_name
+    );
+    const REQUIRED_JOB_COLS = [
+      "id", "plnt", "step", "status", "source_filenames",
+      "blob_keys", "pg_numbers", "header_overrides", "created_by_email",
+    ];
+    const missingJobCols = REQUIRED_JOB_COLS.filter(
+      (c) => !jobsColumns.includes(c)
+    );
+
+    const tableHint =
+      missing.length > 0
+        ? `다음 테이블 누락: ${missing.join(", ")} — 'npm run db:migrate' 실행 필요`
+        : "모든 테이블 존재 ✓";
+    const colHint =
+      missingJobCols.length > 0
+        ? `jobs 컬럼 누락: ${missingJobCols.join(", ")} — 'npm run db:migrate'(0002 등) 실행 필요. 업로드 500의 원인일 수 있음`
+        : "jobs 필수 컬럼 모두 존재 ✓";
+
     return NextResponse.json({
-      ok: missing.length === 0,
+      ok: missing.length === 0 && missingJobCols.length === 0,
       present,
       missing,
       expected: EXPECTED,
-      hint:
-        missing.length > 0
-          ? `다음 테이블 누락: ${missing.join(", ")} — 'npm run db:migrate' 실행 필요`
-          : "모든 테이블 존재 ✓",
+      jobsColumns,
+      missingJobCols,
+      hint: tableHint,
+      jobsHint: colHint,
     });
   } catch (err) {
     return NextResponse.json(
