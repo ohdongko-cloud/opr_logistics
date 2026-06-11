@@ -42,7 +42,9 @@ export function SetPasswordForm() {
                   ? "비밀번호가 일치하지 않습니다."
                   : body.error === "unauthorized"
                     ? "세션이 만료되었습니다. 다시 로그인해주세요."
-                    : "설정에 실패했습니다.";
+                    : body.error === "password_unavailable"
+                      ? "비밀번호 기능이 아직 준비되지 않았습니다(서버 마이그레이션 필요). 관리자에게 문의하세요."
+                      : "설정에 실패했습니다.";
             toast.error(msg);
             if (body.error === "unauthorized") router.push("/login");
             return;

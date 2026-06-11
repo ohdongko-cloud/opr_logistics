@@ -9,7 +9,15 @@ import { hasPassword } from "./roles";
  * (/set-password 페이지 자신은 이 가드를 호출하지 않는다 — 루프 방지)
  */
 export async function enforcePasswordSet(email: string | null): Promise<void> {
-  if (email && !(await hasPassword(email))) {
-    redirect("/set-password");
+  if (!email) return;
+  let hasPw: boolean;
+  try {
+    hasPw = await hasPassword(email);
+  } catch {
+    // password_hash 컬럼 미적용(마이그레이션 지연) 등 DB 오류 → 가드 스킵.
+    // 비밀번호 기능이 준비되기 전에도 사이트가 정상 동작하도록(서버 예외로 다운 방지).
+    return;
   }
+  // redirect()는 NEXT_REDIRECT를 throw하므로 반드시 try/catch 밖에서 호출.
+  if (!hasPw) redirect("/set-password");
 }

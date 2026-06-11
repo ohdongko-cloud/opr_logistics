@@ -98,6 +98,12 @@ export async function POST(req: Request) {
   const token = await signSession(email);
   await setSessionCookie(token);
   // 비밀번호 미설정이면 클라이언트가 /set-password로 유도 (PRD #0004 F4.1/F6.3)
-  const needsPasswordSetup = !(await hasPassword(email));
+  // 컬럼 미적용(마이그레이션 지연) 등 오류 시 강제 설정하지 않고 OTP 로그인으로 진행.
+  let needsPasswordSetup = false;
+  try {
+    needsPasswordSetup = !(await hasPassword(email));
+  } catch {
+    needsPasswordSetup = false;
+  }
   return NextResponse.json({ ok: true, email, needsPasswordSetup });
 }

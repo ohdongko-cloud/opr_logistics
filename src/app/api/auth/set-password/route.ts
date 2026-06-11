@@ -67,7 +67,13 @@ export async function POST(req: Request) {
   }
 
   const encoded = await hashPassword(password);
-  await setPassword(email, encoded);
+  try {
+    await setPassword(email, encoded);
+  } catch (err) {
+    // password_hash 컬럼 미적용(마이그레이션 지연) 등 — 사용자에 안정적 코드만.
+    console.error("[set-password] setPassword failed:", err);
+    return NextResponse.json({ error: "password_unavailable" }, { status: 503 });
+  }
   await recordLogin({
     email,
     ip: ipOf(req),

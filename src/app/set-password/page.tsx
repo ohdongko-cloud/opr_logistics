@@ -13,7 +13,12 @@ export const dynamic = "force-dynamic";
 export default async function SetPasswordPage() {
   const email = await getCurrentEmail();
   if (!email) redirect("/login");
-  const isReset = await hasPassword(email);
+  let isReset = false;
+  try {
+    isReset = await hasPassword(email);
+  } catch {
+    isReset = false; // 컬럼 미적용 등 — 설정 화면으로 표기
+  }
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 p-8">

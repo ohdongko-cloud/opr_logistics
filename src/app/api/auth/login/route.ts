@@ -80,7 +80,13 @@ export async function POST(req: Request) {
   };
 
   const allowed = await checkLoginAllowed(email);
-  const hash = await getPasswordHash(email);
+  // 컬럼 미적용(마이그레이션 지연) 등 오류 시 null 취급 → no_password 통일 실패(500 방지).
+  let hash: string | null = null;
+  try {
+    hash = await getPasswordHash(email);
+  } catch {
+    hash = null;
+  }
   // 타이밍 평준화: 미허용/미설정이어도 항상 scrypt 1회 수행 (비번 설정 여부 누출 방지, S2)
   const ok = await verifyPassword(password, hash ?? DUMMY_PASSWORD_HASH);
 
