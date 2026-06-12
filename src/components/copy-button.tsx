@@ -3,33 +3,27 @@
 import { useState } from "react";
 import { toast } from "sonner";
 
-type NewlineFormat = "LF" | "CRLF" | "TAB_CRLF";
-
-function joinFmt(values: string[], fmt: NewlineFormat): string {
-  const sep = fmt === "LF" ? "\n" : fmt === "CRLF" ? "\r\n" : "\t\r\n";
-  return values.join(sep);
-}
-
-/** SAP 붙여넣기용 컬럼 복사 버튼 (PRD #0002 §4.9 F9) */
+/**
+ * SAP 붙여넣기용 컬럼 복사 버튼 (PRD #0002 §4.9 F9).
+ * 값들을 CRLF(\r\n)로 이어붙여 복사 → SAP/엑셀에 세로 행으로 한 줄씩 들어간다.
+ * (개행 포맷 선택은 혼선을 줄이기 위해 제거 — CRLF 고정)
+ */
 export function CopyButton({
   label,
   values,
   count,
   deduped = true,
-  defaultFormat = "CRLF",
 }: {
   label: string;
   values: string[];
   count: number;
   deduped?: boolean;
-  defaultFormat?: NewlineFormat;
 }) {
   const [copied, setCopied] = useState(false);
   const [fallback, setFallback] = useState<string | null>(null);
-  const [fmt, setFmt] = useState<NewlineFormat>(defaultFormat);
 
   const doCopy = async () => {
-    const text = joinFmt(values, fmt);
+    const text = values.join("\r\n"); // 세로 행 — 각 값이 행 바뀌며 들어감
     try {
       if (
         typeof navigator !== "undefined" &&
@@ -60,27 +54,14 @@ export function CopyButton({
             ({count}건{deduped ? ", 중복제거" : ""})
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={fmt}
-            onChange={(e) => setFmt(e.target.value as NewlineFormat)}
-            className="rounded border border-[var(--color-border)] px-1 py-0.5 text-xs"
-            title="SAP 붙여넣기 개행 포맷"
-            aria-label="개행 포맷"
-          >
-            <option value="CRLF">CRLF</option>
-            <option value="LF">LF</option>
-            <option value="TAB_CRLF">탭+CRLF</option>
-          </select>
-          <button
-            type="button"
-            onClick={doCopy}
-            aria-live="polite"
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
-          >
-            {copied ? "복사됨 ✓" : "전체 복사"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={doCopy}
+          aria-live="polite"
+          className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+        >
+          {copied ? "복사됨 ✓" : "전체 복사"}
+        </button>
       </div>
       {fallback !== null && (
         <textarea
